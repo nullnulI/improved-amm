@@ -1,0 +1,8 @@
+node_modules/
+artifacts/
+cache/
+coverage/
+dist/
+.env
+.DS_Store
+*.pdf
