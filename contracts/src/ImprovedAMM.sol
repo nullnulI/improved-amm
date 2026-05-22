@@ -124,7 +124,7 @@ contract ImprovedAMM is ERC20, Ownable {
         (IERC20 input, IERC20 output, bool zeroForOne) = _pairFor(tokenIn);
         uint256 feeBps = currentFeeBps(tokenIn, amountIn);
         amountOut = quoteSwap(tokenIn, amountIn);
-        if (amountOut < minAmountOut) revert InsufficientOutput();
+        if (amountOut == 0 || amountOut < minAmountOut) revert InsufficientOutput();
 
         input.safeTransferFrom(msg.sender, address(this), amountIn);
 
@@ -166,9 +166,9 @@ contract ImprovedAMM is ERC20, Ownable {
         uint256 pricedReserveIn = actualReserveIn + virtualReserveIn;
         uint256 pricedReserveOut = actualReserveOut + virtualReserveOut;
 
-        uint256 virtualOut = (amountInAfterFee * pricedReserveOut) / (pricedReserveIn + amountInAfterFee);
-        amountOut = virtualOut > virtualReserveOut ? virtualOut - virtualReserveOut : 0;
+        amountOut = (amountInAfterFee * pricedReserveOut) / (pricedReserveIn + amountInAfterFee);
 
+        if (amountOut == 0) revert InsufficientOutput();
         if (amountOut >= actualReserveOut) revert InsufficientLiquidity();
     }
 

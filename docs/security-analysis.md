@@ -8,6 +8,7 @@
 - The contract uses Solidity 0.8 checked arithmetic.
 - Swap output is capped by actual reserves, so virtual reserves cannot create withdrawable tokens.
 - Virtual reserve updates are restricted to the contract owner for the MVP.
+- Dust-sized swaps are rejected when integer rounding would return zero output.
 
 ## Risks and Limitations
 

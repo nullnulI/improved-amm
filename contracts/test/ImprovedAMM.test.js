@@ -66,6 +66,39 @@ describe("ImprovedAMM", function () {
     expect(await amm.reserve1()).to.equal(parse("1000") - quotedOut);
   });
 
+  it("quotes and executes a reverse swap from token B to token A", async function () {
+    const { owner, trader, tokenA, tokenB, amm } = await deployFixture();
+    await amm.connect(owner).addLiquidity(parse("1000"), parse("1000"), 1, await deadline());
+
+    const amountIn = parse("10");
+    const quotedOut = await amm.quoteSwap(tokenB.target, amountIn);
+    const before = await tokenA.balanceOf(trader.address);
+
+    await expect(amm.connect(trader).swapExactIn(tokenB.target, amountIn, quotedOut, await deadline()))
+      .to.emit(amm, "Swap")
+      .withArgs(trader.address, tokenB.target, amountIn, quotedOut, 30);
+
+    expect(await tokenA.balanceOf(trader.address)).to.equal(before + quotedOut);
+    expect(await amm.reserve1()).to.equal(parse("1010"));
+    expect(await amm.reserve0()).to.equal(parse("1000") - quotedOut);
+  });
+
+  it("reverts when a dust-sized quote rounds down to zero output", async function () {
+    const { owner, tokenA, amm } = await deployFixture();
+    await amm.connect(owner).addLiquidity(parse("1000"), parse("1000"), 1, await deadline());
+
+    await expect(amm.quoteSwap(tokenA.target, 1)).to.be.revertedWithCustomError(amm, "InsufficientOutput");
+  });
+
+  it("reverts when a dust-sized swap would return zero output", async function () {
+    const { owner, trader, tokenA, amm } = await deployFixture();
+    await amm.connect(owner).addLiquidity(parse("1000"), parse("1000"), 1, await deadline());
+
+    await expect(
+      amm.connect(trader).swapExactIn(tokenA.target, 1, 0, await deadline())
+    ).to.be.revertedWithCustomError(amm, "InsufficientOutput");
+  });
+
   it("reverts when minAmountOut is too high", async function () {
     const { owner, trader, tokenA, amm } = await deployFixture();
     await amm.connect(owner).addLiquidity(parse("1000"), parse("1000"), 1, await deadline());

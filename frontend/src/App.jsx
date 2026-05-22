@@ -35,6 +35,7 @@ function App() {
   const [amountA, setAmountA] = useState("100");
   const [amountB, setAmountB] = useState("100");
   const [swapIn, setSwapIn] = useState("10");
+  const [swapDirection, setSwapDirection] = useState("A_TO_B");
   const [quote, setQuote] = useState("");
 
   const provider = useMemo(() => {
@@ -106,7 +107,7 @@ function App() {
 
   async function quoteSwap() {
     const { amm } = await contracts();
-    const output = await amm.quoteSwap(tokenAAddress, parseEther(swapIn));
+    const output = await amm.quoteSwap(tokenInAddress(), parseEther(swapIn));
     setQuote(formatEther(output));
     setStatus("Quote calculated.");
   }
@@ -114,9 +115,26 @@ function App() {
   async function swap() {
     const { amm } = await contracts();
     const minOut = quote ? parseEther((Number(quote) * 0.995).toFixed(18)) : 1n;
-    setStatus("Swapping token A for token B...");
-    await (await amm.swapExactIn(tokenAAddress, parseEther(swapIn), minOut, deadline())).wait();
+    setStatus(`Swapping ${inputTokenLabel()} for ${outputTokenLabel()}...`);
+    await (await amm.swapExactIn(tokenInAddress(), parseEther(swapIn), minOut, deadline())).wait();
     await refresh();
+  }
+
+  function tokenInAddress() {
+    return swapDirection === "A_TO_B" ? tokenAAddress : tokenBAddress;
+  }
+
+  function inputTokenLabel() {
+    return swapDirection === "A_TO_B" ? "Token A" : "Token B";
+  }
+
+  function outputTokenLabel() {
+    return swapDirection === "A_TO_B" ? "Token B" : "Token A";
+  }
+
+  function switchDirection() {
+    setSwapDirection((direction) => (direction === "A_TO_B" ? "B_TO_A" : "A_TO_B"));
+    setQuote("");
   }
 
   function deadline() {
@@ -181,11 +199,15 @@ function App() {
 
         <div className="panel">
           <h2>Swap</h2>
+          <div className="direction">
+            <strong>{inputTokenLabel()} {"->"} {outputTokenLabel()}</strong>
+            <button onClick={switchDirection}>Switch Direction</button>
+          </div>
           <label>
-            Token A In
+            {inputTokenLabel()} In
             <input value={swapIn} onChange={(event) => setSwapIn(event.target.value)} />
           </label>
-          <Metric label="Expected Token B Out" value={quote || "-"} />
+          <Metric label={`Expected ${outputTokenLabel()} Out`} value={quote || "-"} />
           <div className="actions">
             <button onClick={quoteSwap}>Quote</button>
             <button onClick={swap}>Swap</button>

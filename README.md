@@ -7,6 +7,7 @@ The MVP is a Uniswap V2-inspired constant-product AMM with:
 - ERC-20 mock tokens for local testing.
 - LP token minting and burning for liquidity providers.
 - Add liquidity, remove liquidity, quote, and exact-input swap flows.
+- Bidirectional swaps between Token A and Token B.
 - Slippage protection through `minAmountOut`.
 - Deadline protection for stale transactions.
 - Virtual reserves as the course-project "novel" pricing feature.

@@ -14,7 +14,7 @@ The base model is `x * y = k`. Our pool quotes swaps using actual reserves plus 
 
 ## 4. Demo Flow
 
-Mint tokens, approve the AMM, add liquidity, quote a swap, execute the swap, then inspect reserve changes.
+Mint tokens, approve the AMM, add liquidity, quote and execute an A-to-B swap, switch direction, then quote and execute a B-to-A swap. The same pool supports both directions because pricing is based on the two token reserves.
 
 ## 5. Security and Limitations
 

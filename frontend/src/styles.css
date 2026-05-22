@@ -104,6 +104,17 @@ h2 {
   gap: 10px;
 }
 
+.direction {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.direction strong {
+  color: #17202a;
+}
+
 .metric {
   display: flex;
   justify-content: space-between;
