@@ -37,6 +37,15 @@ contract Quoter is IPoolSwapCallback {
     }
 
     // ── Quote exact input, single hop ─────────────────────────────────────────
+    /// @notice Simulate an exact-input swap and return the output without spending gas on state changes.
+    /// @dev    Uses the revert-and-catch pattern: Pool.swap reverts in the callback, encoding the result.
+    ///         Must be called via staticCall (eth_call) — it reverts on actual execution.
+    /// @param tokenIn           Input token address
+    /// @param tokenOut          Output token address
+    /// @param fee               Pool fee tier
+    /// @param amountIn          Exact amount of tokenIn to simulate swapping
+    /// @param sqrtPriceLimitX96 Price boundary (0 = no limit)
+    /// @return amountOut        Simulated output amount
     function quoteExactInputSingle(
         address tokenIn,
         address tokenOut,
@@ -62,6 +71,13 @@ contract Quoter is IPoolSwapCallback {
     }
 
     // ── Quote exact output, single hop ────────────────────────────────────────
+    /// @notice Simulate an exact-output swap to find the required input amount.
+    /// @param tokenIn           Input token address
+    /// @param tokenOut          Output token address
+    /// @param fee               Pool fee tier
+    /// @param amountOut         Desired exact output amount
+    /// @param sqrtPriceLimitX96 Price boundary (0 = no limit)
+    /// @return amountIn         Simulated input required
     function quoteExactOutputSingle(
         address tokenIn,
         address tokenOut,

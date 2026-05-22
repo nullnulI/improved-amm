@@ -108,8 +108,12 @@ export const POOL_ABI = [
   'function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, bool unlocked)',
   'function feeGrowthGlobal0X128() view returns (uint256)',
   'function feeGrowthGlobal1X128() view returns (uint256)',
+  'function protocolFee() view returns (uint8)',
+  'function protocolFees() view returns (uint128 token0, uint128 token1)',
   'function getTWAP(uint32 secondsAgo) view returns (int24 arithmeticMeanTick)',
   'function getPosition(address owner, int24 tickLower, int24 tickUpper) view returns (tuple(uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1))',
+  'function setProtocolFee(uint8 _protocolFee)',
+  'function collectProtocol(address recipient) returns (uint128 amount0, uint128 amount1)',
   'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)',
   'event Mint(address sender, address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)',
   'event Burn(address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)',
@@ -119,6 +123,9 @@ export const FACTORY_ABI = [
   'function getPool(address tokenA, address tokenB, uint24 fee) view returns (address)',
   'function createPool(address tokenA, address tokenB, uint24 fee) returns (address)',
   'function feeAmountTickSpacing(uint24 fee) view returns (int24)',
+  'function owner() view returns (address)',
+  'function setPoolProtocolFee(address pool, uint8 denominator)',
+  'function collectPoolProtocol(address pool, address recipient) returns (uint128 amount0, uint128 amount1)',
 ];
 
 export const POSITION_MANAGER_ABI = [

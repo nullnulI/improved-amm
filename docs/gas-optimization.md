@@ -1,32 +1,71 @@
-# Gas Optimization Notes
+# Gas Optimization
 
-## Current Choices
+## Optimization Strategies
 
-- The Solidity optimizer is enabled with 200 runs.
-- Reserves are stored directly instead of recomputing balances on every quote.
-- Custom errors are used instead of long revert strings.
-- Fee logic uses basis points to avoid floating-point math.
-- Quote details are returned from one view call to avoid frontend-side duplicate calculations.
+### Compiler Settings
+- Solidity optimizer enabled with **200 runs** (balances deployment vs call cost)
+- `viaIR: true` for the IR-based optimizer pipeline, enabling cross-function inlining
+- `evmVersion: cancun` targets PUSH0 and transient-storage opcodes
 
-## Local Gas Snapshot
+### Storage Design
+- `Slot0` struct is packed into **one 256-bit storage word**: `uint160 sqrtPriceX96 + int24 tick + uint16 × 3 + bool = 256 bits`
+- `ProtocolFees` packs two `uint128` values into one slot
+- `Position.Info` stores only the delta snapshot, not absolute values — fee claims use subtraction
+- Custom errors (`error Locked()`, `error ZeroLiquidity()`, …) replace revert strings, saving ~50 gas per revert
 
-Approximate gas observed on the local Hardhat network:
+### Reentrancy Guard
+- Uses a storage flag in `slot0.unlocked` rather than a separate `uint256` slot — the flag read/write is part of the already-loaded `slot0` word
 
-| Operation | Approx. Gas |
-| --- | ---: |
-| Initial add liquidity | 244,412 |
-| Swap exact input | 86,534 |
-| Remove liquidity | 86,596 |
+### Arithmetic
+- `FullMath.mulDiv` uses 512-bit intermediate arithmetic to avoid phantom overflow while remaining gas-efficient
+- `unchecked {}` blocks are applied where overflow is provably impossible (fee growth accumulation, tick arithmetic)
+- `SafeCast` eliminates redundant bounds checks by performing them once at the boundary
 
-## Trade-Offs
+### Token Transfers
+- `SafeERC20` used throughout — consistent with production standards and avoids silent transfer failures
+- Callbacks (mint, swap) follow **Checks-Effects-Interactions**: state committed before token transfer
+- No unnecessary ERC20 `balanceOf` calls — the callback pattern guarantees token delivery
 
-- Keeping reserves in storage makes reads cheap and predictable, but every state-changing operation must update them correctly.
-- Virtual reserves add extra arithmetic to quotes, but they make the novel feature easy to explain and test.
-- The contract favors readability over micro-optimization because this is a course project.
+---
 
-## Next Steps
+## Measured Gas Costs (Hardhat local network, optimizer 200 runs, viaIR)
 
-- Compare gas for normal and large swaps.
-- Pack reserve values if token balances are intentionally bounded.
-- Cache repeated storage reads inside state-changing functions.
-- Add a gas report after the contract surface stabilizes.
+Results captured by `contracts/test/gas/GasReport.test.js` on the local Hardhat network:
+
+| Operation | Gas Used | Notes |
+|---|---:|---|
+| `createPool` | ~3,696,230 | Deploys full Pool contract with all libraries |
+| `initialize` | ~70,254 | Sets sqrtPriceX96, writes first oracle observation |
+| `mint` (wide, ±12000 ticks) | ~445,108 | First mint to two fresh ticks |
+| `mint` (narrow, ±60 ticks) | ~359,159 | Concentrated position, lower tickBitmap writes |
+| `exactInputSingle` (1 token) | ~135,575 | In-range single-step swap |
+| `exactInputSingle` (500 tokens) | ~112,084 | Price moves within active range; fewer SSTORE than expected because tick is not crossed |
+| `exactOutputSingle` | ~104,371 | Exact-output single hop |
+| `increaseLiquidity` | ~243,844 | Adds to existing position (no tick flip) |
+| `decreaseLiquidity` (50%) | ~189,421 | Partial burn, no tick clear |
+| `collect` (fees) | ~98,704 | Triggers burn(0) sync then transfers |
+| `exactInput` (multi-hop, 2 pools) | ~200,813 | Token0 → Token1 → TokenC through two pools |
+
+Total gas across all 11 benchmarked operations: **~5,655,593**
+
+> All measurements are approximate and vary with specific state (tick crossings, storage warmth, EVM version). On a public testnet or mainnet, expect comparable figures.
+
+---
+
+## Key Trade-offs
+
+| Choice | Pro | Con |
+|---|---|---|
+| `viaIR: true` | Best optimizer; enables cross-function inlining | Longer compile time |
+| `createPool` deploys full Pool | No proxy overhead; full bytecode visible for auditing | High deployment cost |
+| Custom reentrancy in `slot0` | Saves one storage slot | Less explicit than OpenZeppelin's `ReentrancyGuard` |
+| Tick bitmap search | O(1) amortised next-tick lookup | Complex; bugs would be expensive |
+| Callback pattern for token pulls | No pre-approval needed from pool | Requires callers to implement callbacks |
+
+---
+
+## Further Opportunities
+
+- **Packing `protocolFee` into `Slot0`** would save one SLOAD per swap when the protocol fee is active
+- **Multicall** on the PositionManager would let LPs mint + increase in one tx
+- **TWAP cardinality warm-up** (calling `increaseObservationCardinalityNext` at deployment) saves gas on the first oracle write

@@ -209,6 +209,10 @@ function App() {
               poolState={poolState}
               swapHistory={swapHistory}
               mintHistory={mintHistory}
+              addrs={allAddrs}
+              getSigner={getSigner}
+              account={account}
+              onStatus={setStatus}
             />
           )}
         </div>

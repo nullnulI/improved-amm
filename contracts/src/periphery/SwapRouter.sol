@@ -81,11 +81,20 @@ contract SwapRouter is IPoolSwapCallback {
 
         int256 amountToPay = amount0Delta > 0 ? amount0Delta : amount1Delta;
         if (amountToPay > 0) {
-            IERC20(tokenIn).safeTransferFrom(data.payer, msg.sender, uint256(amountToPay));
+            // For intermediate multi-hop steps the router itself holds the tokens — use transfer.
+            // For the first hop (or single-hop) the user pays — use transferFrom.
+            if (data.payer == address(this)) {
+                IERC20(tokenIn).safeTransfer(msg.sender, uint256(amountToPay));
+            } else {
+                IERC20(tokenIn).safeTransferFrom(data.payer, msg.sender, uint256(amountToPay));
+            }
         }
     }
 
     // ── Single-hop exact input ─────────────────────────────────────────────────
+    /// @notice Swap an exact amount of one token for as many of another as possible (single pool).
+    /// @param params  ExactInputSingleParams containing tokenIn, tokenOut, fee, amountIn, slippage, etc.
+    /// @return amountOut Tokens received by the recipient
     function exactInputSingle(ExactInputSingleParams calldata params)
         external
         checkDeadline(params.deadline)
@@ -109,6 +118,9 @@ contract SwapRouter is IPoolSwapCallback {
     }
 
     // ── Single-hop exact output ────────────────────────────────────────────────
+    /// @notice Swap as few input tokens as possible to receive an exact output amount (single pool).
+    /// @param params  ExactOutputSingleParams with desired output amount and max input constraint
+    /// @return amountIn Actual token0 or token1 spent
     function exactOutputSingle(ExactOutputSingleParams calldata params)
         external
         checkDeadline(params.deadline)
@@ -132,6 +144,11 @@ contract SwapRouter is IPoolSwapCallback {
     }
 
     // ── Multi-hop exact input ──────────────────────────────────────────────────
+    /// @notice Swap an exact amount of tokens along an encoded multi-hop path.
+    ///         Path format: abi.encodePacked(tokenA, fee01, tokenB, fee12, tokenC, ...)
+    /// @dev    Intermediate hops route through this contract; only the final hop sends to recipient.
+    /// @param params  ExactInputParams with path, amountIn, and minimum amountOut
+    /// @return amountOut Final tokens received by the recipient
     function exactInput(ExactInputParams calldata params)
         external
         checkDeadline(params.deadline)

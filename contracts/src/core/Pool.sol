@@ -11,13 +11,17 @@ import "../libraries/SqrtPriceMath.sol";
 import "../libraries/LiquidityMath.sol";
 import "../libraries/FullMath.sol";
 import "../libraries/SafeCast.sol";
+import "./interfaces/IPoolFactory.sol";
 import "./interfaces/IPoolMintCallback.sol";
 import "./interfaces/IPoolSwapCallback.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title Concentrated Liquidity Pool
-/// @notice Implements Uniswap V3-style concentrated liquidity with TWAP oracle and fee accumulation.
+/// @notice Implements Uniswap V3-style concentrated liquidity with TWAP oracle, fee accumulation,
+///         and an optional protocol fee that routes a fraction of swap fees to the protocol treasury.
+/// @dev Positions are identified by (owner, tickLower, tickUpper). The pool uses a reentrancy lock
+///      stored in slot0.unlocked and applies Checks-Effects-Interactions throughout.
 contract Pool {
     using SafeERC20 for IERC20;
     using Tick for mapping(int24 => Tick.Info);
@@ -48,12 +52,19 @@ contract Pool {
     Slot0 public slot0;
 
     // ── Pool state ─────────────────────────────────────────────────────────────
+    /// @notice Accumulated fee growth per unit of liquidity for token0, Q128
     uint256 public feeGrowthGlobal0X128;
+    /// @notice Accumulated fee growth per unit of liquidity for token1, Q128
     uint256 public feeGrowthGlobal1X128;
+    /// @notice Currently active liquidity — sum of all in-range positions
     uint128 public liquidity;
 
     struct ProtocolFees { uint128 token0; uint128 token1; }
+    /// @notice Protocol-owned fee balances waiting to be collected
     ProtocolFees public protocolFees;
+
+    /// @notice Protocol fee denominator (0 = disabled; N ≥ 4 means 1/N of each swap fee goes to protocol)
+    uint8 public protocolFee;
 
     mapping(int24 => Tick.Info)           public ticks;
     mapping(int16 => uint256)             public tickBitmap;
@@ -71,6 +82,7 @@ contract Pool {
     event Collect(address indexed owner, address recipient, int24 indexed tickLower, int24 indexed tickUpper,
                   uint128 amount0, uint128 amount1);
     event CollectProtocol(address indexed sender, address indexed recipient, uint128 amount0, uint128 amount1);
+    event SetProtocolFee(uint8 feeProtocol);
     event IncreaseObservationCardinalityNext(uint16 oldNext, uint16 newNext);
 
     // ── Errors ─────────────────────────────────────────────────────────────────
@@ -107,6 +119,8 @@ contract Pool {
     }
 
     // ── Initialise ─────────────────────────────────────────────────────────────
+    /// @notice Set the initial price of the pool. Must be called once before any other operation.
+    /// @param sqrtPriceX96 Initial square-root price in Q64.96 fixed-point format
     function initialize(uint160 sqrtPriceX96) external {
         if (slot0.sqrtPriceX96 != 0) revert AlreadyInitialized();
         int24 tick = TickMath.getTickAtSqrtRatio(sqrtPriceX96);
@@ -123,6 +137,15 @@ contract Pool {
     }
 
     // ── Add liquidity ──────────────────────────────────────────────────────────
+    /// @notice Add liquidity for the given recipient over [tickLower, tickUpper].
+    ///         Calls back into msg.sender via IPoolMintCallback to pull tokens.
+    /// @param recipient  Address that will own the position
+    /// @param tickLower  Lower tick boundary (must be a multiple of tickSpacing)
+    /// @param tickUpper  Upper tick boundary (must be a multiple of tickSpacing)
+    /// @param amount     Liquidity units to add (must be > 0)
+    /// @param data       Arbitrary bytes forwarded to the mint callback
+    /// @return amount0   Token0 deposited
+    /// @return amount1   Token1 deposited
     function mint(
         address recipient,
         int24 tickLower,
@@ -156,6 +179,14 @@ contract Pool {
     }
 
     // ── Remove liquidity (does not transfer; use collect after) ───────────────
+    /// @notice Remove up to `amount` liquidity from the caller's position.
+    ///         Withdrawn tokens are held in the position's tokensOwed until `collect` is called.
+    ///         Calling burn(0) triggers a fee sync without removing any liquidity.
+    /// @param tickLower Lower tick of the position
+    /// @param tickUpper Upper tick of the position
+    /// @param amount    Liquidity to remove (0 = fee sync only)
+    /// @return amount0  Token0 owed (not yet transferred)
+    /// @return amount1  Token1 owed (not yet transferred)
     function burn(
         int24 tickLower,
         int24 tickUpper,
@@ -180,6 +211,15 @@ contract Pool {
     }
 
     // ── Collect accrued fees & burned tokens ──────────────────────────────────
+    /// @notice Transfer up to `amount0Requested`/`amount1Requested` of accrued fees
+    ///         and burned tokens to `recipient`. Must burn() first to sync tokensOwed.
+    /// @param recipient        Destination for the tokens
+    /// @param tickLower        Lower tick of the caller's position
+    /// @param tickUpper        Upper tick of the caller's position
+    /// @param amount0Requested Maximum token0 to collect (use type(uint128).max for all)
+    /// @param amount1Requested Maximum token1 to collect (use type(uint128).max for all)
+    /// @return amount0         Actual token0 transferred
+    /// @return amount1         Actual token1 transferred
     function collect(
         address recipient,
         int24 tickLower,
@@ -196,6 +236,16 @@ contract Pool {
     }
 
     // ── Swap ───────────────────────────────────────────────────────────────────
+    /// @notice Execute a swap, calling back into msg.sender to receive input tokens.
+    /// @dev    Positive amountSpecified = exact input; negative = exact output.
+    ///         The caller must implement IPoolSwapCallback.uniswapV3SwapCallback.
+    /// @param recipient          Address that receives output tokens
+    /// @param zeroForOne         True = swap token0 for token1 (price decreases)
+    /// @param amountSpecified    Signed amount: positive for exact-in, negative for exact-out
+    /// @param sqrtPriceLimitX96  Price boundary; swap stops if this price is reached
+    /// @param data               Arbitrary bytes forwarded to the swap callback
+    /// @return amount0           Net token0 delta (positive = pool received, negative = pool sent)
+    /// @return amount1           Net token1 delta
     function swap(
         address recipient,
         bool zeroForOne,
@@ -259,9 +309,20 @@ contract Pool {
                 }
             }
 
+            // Route protocol fee before distributing remainder to LPs
+            uint256 lpFeeAmount = step.feeAmount;
+            if (protocolFee > 0) {
+                uint256 protocolDelta = lpFeeAmount / protocolFee;
+                if (zeroForOne) {
+                    unchecked { protocolFees.token0 += uint128(protocolDelta); }
+                } else {
+                    unchecked { protocolFees.token1 += uint128(protocolDelta); }
+                }
+                lpFeeAmount -= protocolDelta;
+            }
             if (state.liquidity > 0) {
                 unchecked {
-                    state.feeGrowthGlobalX128 += FullMath.mulDiv(step.feeAmount, 0x100000000000000000000000000000000, state.liquidity);
+                    state.feeGrowthGlobalX128 += FullMath.mulDiv(lpFeeAmount, 0x100000000000000000000000000000000, state.liquidity);
                 }
             }
 
@@ -328,7 +389,45 @@ contract Pool {
         emit Swap(msg.sender, recipient, amount0, amount1, state.sqrtPriceX96, state.liquidity, state.tick);
     }
 
+    // ── Protocol fee management (factory owner only) ───────────────────────────
+    /// @notice Set the protocol fee denominator for this pool.
+    ///         E.g. denominator=5 means 1/5 of each swap's fee goes to the protocol.
+    /// @dev    Callable by the factory contract or the factory owner directly.
+    ///         Must be 0 (disabled) or ≥ 4 to avoid excessive fee capture.
+    /// @param _protocolFee New denominator (0 = disabled)
+    function setProtocolFee(uint8 _protocolFee) external {
+        require(
+            msg.sender == factory || msg.sender == IPoolFactory(factory).owner(),
+            "NOT_FACTORY_OWNER"
+        );
+        require(_protocolFee == 0 || _protocolFee >= 4, "INVALID_PROTOCOL_FEE");
+        protocolFee = _protocolFee;
+        emit SetProtocolFee(_protocolFee);
+    }
+
+    /// @notice Collect all accrued protocol fees and send them to `recipient`.
+    /// @dev    Callable by the factory contract or the factory owner directly.
+    /// @param recipient Address to receive protocol fee tokens
+    /// @return amount0  Token0 collected
+    /// @return amount1  Token1 collected
+    function collectProtocol(address recipient)
+        external
+        returns (uint128 amount0, uint128 amount1)
+    {
+        require(
+            msg.sender == factory || msg.sender == IPoolFactory(factory).owner(),
+            "NOT_FACTORY_OWNER"
+        );
+        amount0 = protocolFees.token0;
+        amount1 = protocolFees.token1;
+        if (amount0 > 0) { protocolFees.token0 = 0; IERC20(token0).safeTransfer(recipient, amount0); }
+        if (amount1 > 0) { protocolFees.token1 = 0; IERC20(token1).safeTransfer(recipient, amount1); }
+        emit CollectProtocol(msg.sender, recipient, amount0, amount1);
+    }
+
     // ── Increase TWAP observation capacity ─────────────────────────────────────
+    /// @notice Grow the oracle's ring buffer to hold more historical observations.
+    /// @param observationCardinalityNext Desired number of observations (must be ≥ current)
     function increaseObservationCardinalityNext(uint16 observationCardinalityNext) external lock {
         uint16 observationCardinalityNextOld = slot0.observationCardinalityNext;
         uint16 observationCardinalityNextNew = observations.grow(observationCardinalityNextOld, observationCardinalityNext);
@@ -338,6 +437,10 @@ contract Pool {
     }
 
     // ── TWAP read ──────────────────────────────────────────────────────────────
+    /// @notice Return raw oracle cumulative values at each of the given lookback times.
+    /// @param secondsAgos Array of seconds-ago values (e.g. [300, 0] for 5-minute window)
+    /// @return tickCumulatives                        Cumulative tick values
+    /// @return secondsPerLiquidityCumulativeX128s     Cumulative seconds-per-liquidity values
     function observe(uint32[] calldata secondsAgos) external view returns (
         int56[] memory tickCumulatives,
         uint160[] memory secondsPerLiquidityCumulativeX128s
@@ -368,6 +471,11 @@ contract Pool {
     }
 
     // ── Position state query ───────────────────────────────────────────────────
+    /// @notice Retrieve the on-chain position data for a given (owner, tickLower, tickUpper) key.
+    /// @param owner     Position owner address
+    /// @param tickLower Lower tick boundary
+    /// @param tickUpper Upper tick boundary
+    /// @return          Position.Info struct with liquidity, feeGrowth snapshots, and tokensOwed
     function getPosition(address owner, int24 tickLower, int24 tickUpper)
         external view returns (Position.Info memory)
     {

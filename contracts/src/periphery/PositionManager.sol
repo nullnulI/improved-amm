@@ -106,6 +106,8 @@ contract PositionManager is ERC721, IPoolMintCallback {
     }
 
     // ── IPoolMintCallback ──────────────────────────────────────────────────────
+    /// @inheritdoc IPoolMintCallback
+    /// @dev Verifies the caller is the authentic pool and pulls tokens from the original payer.
     function uniswapV3MintCallback(
         uint256 amount0Owed,
         uint256 amount1Owed,
@@ -120,6 +122,14 @@ contract PositionManager is ERC721, IPoolMintCallback {
     }
 
     // ── Mint new position ──────────────────────────────────────────────────────
+    /// @notice Create a new LP position (ERC-721 NFT) and deposit liquidity into the pool.
+    /// @dev    Computes the optimal liquidity from desired amounts, calls Pool.mint, and mints an NFT.
+    ///         Reverts if computed liquidity is zero or slippage bounds are exceeded.
+    /// @param params  MintParams struct containing token pair, fee, tick range, desired amounts, and recipient
+    /// @return tokenId   ERC-721 token ID representing this position
+    /// @return liquidity Actual liquidity units added to the pool
+    /// @return amount0   Token0 actually deposited
+    /// @return amount1   Token1 actually deposited
     function mint(MintParams calldata params)
         external
         checkDeadline(params.deadline)
@@ -174,6 +184,11 @@ contract PositionManager is ERC721, IPoolMintCallback {
     }
 
     // ── Add liquidity to existing position ────────────────────────────────────
+    /// @notice Add more liquidity to an existing position without changing its tick range.
+    /// @param params  IncreaseLiquidityParams with token amounts, slippage bounds, and deadline
+    /// @return liquidity Liquidity units added
+    /// @return amount0   Token0 deposited
+    /// @return amount1   Token1 deposited
     function increaseLiquidity(IncreaseLiquidityParams calldata params)
         external
         checkDeadline(params.deadline)
@@ -210,6 +225,11 @@ contract PositionManager is ERC721, IPoolMintCallback {
     }
 
     // ── Remove liquidity from existing position ───────────────────────────────
+    /// @notice Remove a specified amount of liquidity from a position.
+    ///         Tokens become claimable via `collect`; they are not transferred here.
+    /// @param params  DecreaseLiquidityParams with liquidity amount, min bounds, and deadline
+    /// @return amount0 Token0 now owed to the position owner
+    /// @return amount1 Token1 now owed to the position owner
     function decreaseLiquidity(DecreaseLiquidityParams calldata params)
         external
         checkDeadline(params.deadline)
@@ -232,6 +252,11 @@ contract PositionManager is ERC721, IPoolMintCallback {
     }
 
     // ── Collect fees ───────────────────────────────────────────────────────────
+    /// @notice Collect up to `amount0Max`/`amount1Max` of accrued fees and burned tokens.
+    ///         Triggers a burn(0) on the pool to sync fee snapshots before collecting.
+    /// @param params  CollectParams with tokenId, recipient, and maximum amounts
+    /// @return amount0 Token0 sent to recipient
+    /// @return amount1 Token1 sent to recipient
     function collect(CollectParams calldata params)
         external
         isAuthorized(params.tokenId)
@@ -256,10 +281,15 @@ contract PositionManager is ERC721, IPoolMintCallback {
     }
 
     // ── Queries ────────────────────────────────────────────────────────────────
+    /// @notice Return the stored position data for a given NFT token ID.
+    /// @param tokenId The ERC-721 token ID
+    /// @return        PositionData struct with pool, ticks, liquidity, fee snapshots, and tokens owed
     function positions(uint256 tokenId) external view returns (PositionData memory) {
         return _positions[tokenId];
     }
 
+    /// @notice Total number of positions minted (including burned ones whose NFTs were transferred).
+    /// @return Count of minted token IDs
     function totalSupply() external view returns (uint256) {
         return _nextTokenId - 1;
     }

@@ -429,6 +429,83 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   border: 1px solid var(--border);
 }
 
+/* ── Balance row ─────────────────────────────────────────────────────────────── */
+.balance-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.max-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #dbeafe;
+  color: var(--blue);
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1.6;
+}
+.max-btn:hover { background: #bfdbfe; }
+
+/* ── Approve button ───────────────────────────────────────────────────────────── */
+.btn-approve {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+.btn-approve:hover:not(:disabled) { background: #fde68a; }
+
+/* ── Token out label ─────────────────────────────────────────────────────────── */
+.out-label { background: #16a34a; }
+
+/* ── Panel header ────────────────────────────────────────────────────────────── */
+.panel-header { display: flex; justify-content: space-between; align-items: center; }
+.btn-sm { padding: 5px 12px; font-size: 13px; background: #f1f5f9; color: var(--text); border: 1px solid var(--border); }
+.btn-sm:hover { background: #e2e8f0; }
+
+/* ── Increase liquidity form ─────────────────────────────────────────────────── */
+.increase-form {
+  margin-top: 8px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── JIT warning ─────────────────────────────────────────────────────────────── */
+.jit-border { border-color: #f59e0b !important; }
+.jit-warning {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #92400e;
+}
+
+/* ── Analytics extra ─────────────────────────────────────────────────────────── */
+.chart-meta { display: flex; gap: 16px; font-size: 13px; color: var(--text-2); }
+.chart-meta strong { color: var(--text); }
+
+.il-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0; }
+.il-card {
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.il-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); }
+.il-value { font-size: 26px; font-weight: 800; }
+.il-sub   { font-size: 11px; color: var(--text-2); }
+
 /* ── Responsive ──────────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
   .pool-bar { padding: 8px 12px; }

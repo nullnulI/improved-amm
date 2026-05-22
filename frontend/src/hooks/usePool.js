@@ -19,12 +19,16 @@ export function usePool(poolAddress, provider) {
 
     async function loadState() {
       try {
-        const [slot0, liquidity, t0addr, t1addr, fee] = await Promise.all([
+        const [slot0, liquidity, t0addr, t1addr, fee, fg0, fg1, protocolFeeDenom, protocolFeesData] = await Promise.all([
           pool.slot0(),
           pool.liquidity(),
           pool.token0(),
           pool.token1(),
           pool.fee(),
+          pool.feeGrowthGlobal0X128(),
+          pool.feeGrowthGlobal1X128(),
+          pool.protocolFee().catch(() => 0),
+          pool.protocolFees().catch(() => ({ token0: 0n, token1: 0n })),
         ]);
 
         const tok0 = new Contract(t0addr, ERC20_ABI, provider);
@@ -53,8 +57,13 @@ export function usePool(poolAddress, provider) {
           symbol0: sym0,
           symbol1: sym1,
           fee: Number(fee),
+          feeGrowthGlobal0X128: fg0,
+          feeGrowthGlobal1X128: fg1,
           twap5m,
           twap30m,
+          protocolFeeDenominator: Number(protocolFeeDenom),
+          protocolFeeToken0: protocolFeesData.token0,
+          protocolFeeToken1: protocolFeesData.token1,
         });
       } catch (e) {
         console.warn('Pool state load failed:', e.message);
@@ -81,27 +90,25 @@ export function usePool(poolAddress, provider) {
         }));
         setSwapHistory(history.sort((a, b) => a.ts - b.ts));
 
-        const mintFilter = pool.filters.Mint();
-        const mintEvents = await pool.queryFilter(mintFilter, fromBlock, toBlock);
-        const burns = {};
-        const burnFilter = pool.filters.Burn();
-        const burnEvents = await pool.queryFilter(burnFilter, fromBlock, toBlock);
-        burnEvents.forEach((ev) => {
-          const k = `${ev.args.tickLower}_${ev.args.tickUpper}`;
-          burns[k] = (burns[k] || 0n) + ev.args.amount;
-        });
+        const [mintEvents, burnEvents] = await Promise.all([
+          pool.queryFilter(pool.filters.Mint(), fromBlock, toBlock),
+          pool.queryFilter(pool.filters.Burn(), fromBlock, toBlock),
+        ]);
 
-        const mints = mintEvents.map((ev) => ({
-          tickLower: Number(ev.args.tickLower),
-          tickUpper: Number(ev.args.tickUpper),
-          amount: ev.args.amount,
-        }));
-
-        // Subtract burns
-        burnEvents.forEach((ev) => {
-          // already accumulated, just pass raw mints; depth chart will combine
+        // Build net liquidity map (mints minus burns per tick range)
+        const liqMap = {};
+        mintEvents.forEach((ev) => {
+          const k = `${Number(ev.args.tickLower)}_${Number(ev.args.tickUpper)}`;
+          if (!liqMap[k]) liqMap[k] = { tickLower: Number(ev.args.tickLower), tickUpper: Number(ev.args.tickUpper), amount: 0n };
+          liqMap[k].amount += ev.args.amount;
         });
-        setMintHistory(mints);
+        burnEvents.forEach((ev) => {
+          const k = `${Number(ev.args.tickLower)}_${Number(ev.args.tickUpper)}`;
+          if (!liqMap[k]) liqMap[k] = { tickLower: Number(ev.args.tickLower), tickUpper: Number(ev.args.tickUpper), amount: 0n };
+          liqMap[k].amount -= ev.args.amount;
+        });
+        const netMints = Object.values(liqMap).filter((m) => m.amount > 0n);
+        setMintHistory(netMints);
       } catch (e) {
         console.warn('History load failed:', e.message);
       }
@@ -115,9 +122,13 @@ export function usePool(poolAddress, provider) {
     const onSwap = async (sender, recipient, amount0, amount1, sqrtPriceX96, liq, tick, ev) => {
       const block = await provider.getBlock(ev.blockNumber);
       const price = sqrtPriceX96ToPrice(sqrtPriceX96);
+      // Use the positive (input) leg as volume in token0 terms
+      const volume = amount0 > 0n
+        ? Number(amount0) / 1e18
+        : Number(-amount1) / 1e18;
       setSwapHistory((prev) => [
         ...prev,
-        { ts: block?.timestamp * 1000 || Date.now(), price, volume: Math.abs(Number(amount0)) / 1e18 },
+        { ts: block?.timestamp * 1000 || Date.now(), price, volume: Math.max(0, volume) },
       ]);
     };
     pool.on('Swap', onSwap);
