@@ -6,6 +6,17 @@
 - Reserves are stored directly instead of recomputing balances on every quote.
 - Custom errors are used instead of long revert strings.
 - Fee logic uses basis points to avoid floating-point math.
+- Quote details are returned from one view call to avoid frontend-side duplicate calculations.
+
+## Local Gas Snapshot
+
+Approximate gas observed on the local Hardhat network:
+
+| Operation | Approx. Gas |
+| --- | ---: |
+| Initial add liquidity | 244,412 |
+| Swap exact input | 86,534 |
+| Remove liquidity | 86,596 |
 
 ## Trade-Offs
 

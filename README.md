@@ -18,6 +18,13 @@ The MVP is a Uniswap V2-inspired constant-product AMM with:
 
 Standard `x * y = k` AMMs are simple and composable, but they expose traders to price impact and LPs to market risk. This project starts from the Uniswap V2 CPAMM model and adds virtual reserves plus dynamic fees to show how protocol parameters can change trading behavior.
 
+## What Makes It Novel
+
+- Virtual reserves are used in swap quotes to reduce price impact without making virtual liquidity withdrawable.
+- Dynamic fees increase from 0.3% to 0.5% for large trades, demonstrating a simple volatility/risk-aware fee model.
+- Quote details expose expected output, fee, and price impact so users can inspect trade quality before execution.
+- Dust-sized swaps that round down to zero output are rejected instead of silently taking user input.
+
 ## Quick Start
 
 ```bash
@@ -49,8 +56,9 @@ Open the Vite URL, connect MetaMask to `localhost:8545` / chain ID `31337`, then
 1. Mint demo tokens.
 2. Approve the AMM.
 3. Add liquidity.
-4. Quote a swap.
-5. Swap Token A for Token B.
+4. Quote a swap and inspect fee / price impact / minimum received.
+5. Swap Token A for Token B, then switch direction and swap Token B for Token A.
+6. Remove liquidity.
 
 ## Project Structure
 

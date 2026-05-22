@@ -5,14 +5,17 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract ImprovedAMM is ERC20, Ownable {
+contract ImprovedAMM is ERC20, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 public constant BPS = 10_000;
     uint256 public constant BASE_FEE_BPS = 30;
     uint256 public constant LARGE_TRADE_FEE_BPS = 50;
     uint256 public constant LARGE_TRADE_THRESHOLD_BPS = 1_000;
+    uint256 public constant MAX_LIQUIDITY_IMBALANCE_BPS = 100;
+    uint256 public constant MAX_VIRTUAL_RESERVE_MULTIPLIER = 5;
     uint256 private constant MINIMUM_LIQUIDITY = 1_000;
 
     IERC20 public immutable token0;
@@ -39,6 +42,8 @@ contract ImprovedAMM is ERC20, Ownable {
     error InsufficientLiquidity();
     error InsufficientOutput();
     error InvalidAmount();
+    error ImbalancedLiquidity();
+    error VirtualReserveTooLarge();
 
     constructor(
         IERC20 token0_,
@@ -61,7 +66,7 @@ contract ImprovedAMM is ERC20, Ownable {
         uint256 amount1,
         uint256 minLiquidity,
         uint256 deadline
-    ) external returns (uint256 liquidity) {
+    ) external nonReentrant returns (uint256 liquidity) {
         _checkDeadline(deadline);
         if (amount0 == 0 || amount1 == 0) revert InvalidAmount();
 
@@ -70,6 +75,7 @@ contract ImprovedAMM is ERC20, Ownable {
             liquidity = _sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY;
             _mint(address(0xdead), MINIMUM_LIQUIDITY);
         } else {
+            _validateLiquidityRatio(amount0, amount1);
             uint256 liquidity0 = (amount0 * totalLp) / reserve0;
             uint256 liquidity1 = (amount1 * totalLp) / reserve1;
             liquidity = liquidity0 < liquidity1 ? liquidity0 : liquidity1;
@@ -92,7 +98,7 @@ contract ImprovedAMM is ERC20, Ownable {
         uint256 minAmount0,
         uint256 minAmount1,
         uint256 deadline
-    ) external returns (uint256 amount0, uint256 amount1) {
+    ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
         _checkDeadline(deadline);
         if (liquidity == 0) revert InvalidAmount();
 
@@ -117,13 +123,13 @@ contract ImprovedAMM is ERC20, Ownable {
         uint256 amountIn,
         uint256 minAmountOut,
         uint256 deadline
-    ) external returns (uint256 amountOut) {
+    ) external nonReentrant returns (uint256 amountOut) {
         _checkDeadline(deadline);
         if (amountIn == 0) revert InvalidAmount();
 
         (IERC20 input, IERC20 output, bool zeroForOne) = _pairFor(tokenIn);
-        uint256 feeBps = currentFeeBps(tokenIn, amountIn);
-        amountOut = quoteSwap(tokenIn, amountIn);
+        (uint256 quotedOut, uint256 feeBps,) = quoteSwapDetails(tokenIn, amountIn);
+        amountOut = quotedOut;
         if (amountOut == 0 || amountOut < minAmountOut) revert InsufficientOutput();
 
         input.safeTransferFrom(msg.sender, address(this), amountIn);
@@ -143,6 +149,13 @@ contract ImprovedAMM is ERC20, Ownable {
     }
 
     function quoteSwap(address tokenIn, uint256 amountIn) public view returns (uint256 amountOut) {
+        (amountOut,,) = quoteSwapDetails(tokenIn, amountIn);
+    }
+
+    function quoteSwapDetails(
+        address tokenIn,
+        uint256 amountIn
+    ) public view returns (uint256 amountOut, uint256 feeBps, uint256 priceImpactBps) {
         if (amountIn == 0) revert InvalidAmount();
 
         bool zeroForOne;
@@ -161,7 +174,7 @@ contract ImprovedAMM is ERC20, Ownable {
 
         if (actualReserveIn == 0 || actualReserveOut == 0) revert InsufficientLiquidity();
 
-        uint256 feeBps = currentFeeBps(tokenIn, amountIn);
+        feeBps = currentFeeBps(tokenIn, amountIn);
         uint256 amountInAfterFee = (amountIn * (BPS - feeBps)) / BPS;
         uint256 pricedReserveIn = actualReserveIn + virtualReserveIn;
         uint256 pricedReserveOut = actualReserveOut + virtualReserveOut;
@@ -170,6 +183,11 @@ contract ImprovedAMM is ERC20, Ownable {
 
         if (amountOut == 0) revert InsufficientOutput();
         if (amountOut >= actualReserveOut) revert InsufficientLiquidity();
+
+        uint256 spotOut = (amountInAfterFee * pricedReserveOut) / pricedReserveIn;
+        if (spotOut > amountOut) {
+            priceImpactBps = ((spotOut - amountOut) * BPS) / spotOut;
+        }
     }
 
     function currentFeeBps(address tokenIn, uint256 amountIn) public view returns (uint256) {
@@ -193,6 +211,7 @@ contract ImprovedAMM is ERC20, Ownable {
     }
 
     function updateVirtualReserves(uint256 virtualReserve0_, uint256 virtualReserve1_) external onlyOwner {
+        _validateVirtualReserves(virtualReserve0_, virtualReserve1_);
         virtualReserve0 = virtualReserve0_;
         virtualReserve1 = virtualReserve1_;
         emit VirtualReservesUpdated(virtualReserve0_, virtualReserve1_);
@@ -206,6 +225,28 @@ contract ImprovedAMM is ERC20, Ownable {
             return (token1, token0, false);
         }
         revert InvalidToken();
+    }
+
+    function _validateLiquidityRatio(uint256 amount0, uint256 amount1) private view {
+        uint256 left = amount0 * reserve1;
+        uint256 right = amount1 * reserve0;
+        uint256 diff = left > right ? left - right : right - left;
+        uint256 ratioBase = left > right ? left : right;
+
+        if (diff * BPS > ratioBase * MAX_LIQUIDITY_IMBALANCE_BPS) {
+            revert ImbalancedLiquidity();
+        }
+    }
+
+    function _validateVirtualReserves(uint256 virtualReserve0_, uint256 virtualReserve1_) private view {
+        if (
+            (reserve0 == 0 && virtualReserve0_ > 0)
+                || (reserve1 == 0 && virtualReserve1_ > 0)
+                || virtualReserve0_ > reserve0 * MAX_VIRTUAL_RESERVE_MULTIPLIER
+                || virtualReserve1_ > reserve1 * MAX_VIRTUAL_RESERVE_MULTIPLIER
+        ) {
+            revert VirtualReserveTooLarge();
+        }
     }
 
     function _checkDeadline(uint256 deadline) private view {

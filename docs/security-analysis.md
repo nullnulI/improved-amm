@@ -2,13 +2,15 @@
 
 ## Implemented Controls
 
-- `minAmountOut` prevents execution when a swap returns less than the user accepts.
-- `deadline` prevents old signed transactions from being mined unexpectedly later.
-- SafeERC20 wrappers support ERC-20 tokens with non-standard return behavior.
-- The contract uses Solidity 0.8 checked arithmetic.
-- Swap output is capped by actual reserves, so virtual reserves cannot create withdrawable tokens.
-- Virtual reserve updates are restricted to the contract owner for the MVP.
-- Dust-sized swaps are rejected when integer rounding would return zero output.
+| Risk | Mitigation | Remaining Limitation |
+| --- | --- | --- |
+| Slippage or sandwich-style adverse execution | `minAmountOut` rejects swaps below the user-selected minimum. | No private mempool or full MEV protection is implemented. |
+| Stale transactions | `deadline` rejects old transactions. | Users still choose the deadline window. |
+| Reentrancy during token transfers | Liquidity and swap state-changing functions use `ReentrancyGuard`. | This is not a substitute for a full audit. |
+| Non-standard ERC-20 behavior | `SafeERC20` is used for token transfers. | Fee-on-transfer tokens are not explicitly supported. |
+| Zero-output dust swaps | Quotes and swaps revert when integer rounding returns zero output. | Very small trades may fail instead of executing. |
+| Virtual liquidity overreach | Owner updates are bounded by actual reserves. | Owner control is centralized in this MVP. |
+| Imbalanced liquidity deposits | Follow-up liquidity must stay close to the current reserve ratio. | LPs must calculate the correct ratio after large swaps. |
 
 ## Risks and Limitations
 

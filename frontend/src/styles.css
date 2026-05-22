@@ -31,6 +31,11 @@ button:hover {
   background: #1e40af;
 }
 
+button:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
 input {
   width: 100%;
   min-height: 40px;
