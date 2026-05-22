@@ -18,6 +18,7 @@ contract PoolFactory is IPoolFactory {
     /// @notice Retrieves the pool address for a given (token0, token1, fee) triplet
     mapping(address => mapping(address => mapping(uint24 => address))) public override getPool;
 
+    /// @dev Restricts administrative actions to the current factory owner.
     modifier onlyOwner() {
         require(msg.sender == owner, "NOT_OWNER");
         _;
@@ -34,6 +35,7 @@ contract PoolFactory is IPoolFactory {
         emit FeeAmountEnabled(10000, 200);
     }
 
+    /// @notice Emitted when the owner enables a new fee tier.
     event FeeAmountEnabled(uint24 indexed fee, int24 indexed tickSpacing);
 
     /// @notice Register a new fee tier. Only callable by the factory owner.
@@ -59,12 +61,14 @@ contract PoolFactory is IPoolFactory {
         uint24 fee
     ) external override returns (address pool) {
         require(tokenA != tokenB, "SAME_TOKEN");
+        // Canonical ordering ensures a single registry entry per pair.
         (address _token0, address _token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         require(_token0 != address(0), "ZERO_ADDRESS");
         int24 tickSpacing = feeAmountTickSpacing[fee];
         require(tickSpacing != 0, "FEE_NOT_ENABLED");
         require(getPool[_token0][_token1][fee] == address(0), "POOL_EXISTS");
 
+        // The pool address is stored for both token orderings for simpler lookups.
         pool = address(new Pool(address(this), _token0, _token1, fee, tickSpacing));
         getPool[_token0][_token1][fee] = pool;
         getPool[_token1][_token0][fee] = pool;
