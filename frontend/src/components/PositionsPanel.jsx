@@ -153,11 +153,11 @@ export function PositionsPanel({ addrs, poolState, getSigner, provider, account,
 
       if (d0 > 0n) {
         const al0 = await t0.allowance(account, addrs.POSITION_MANAGER);
-        if (al0 < d0) await (await t0.approve(addrs.POSITION_MANAGER, d0 * 10n)).wait();
+        if (al0 < d0) await (await t0.approve(addrs.POSITION_MANAGER, d0)).wait();
       }
       if (d1 > 0n) {
         const al1 = await t1.allowance(account, addrs.POSITION_MANAGER);
-        if (al1 < d1) await (await t1.approve(addrs.POSITION_MANAGER, d1 * 10n)).wait();
+        if (al1 < d1) await (await t1.approve(addrs.POSITION_MANAGER, d1)).wait();
       }
 
       const tx = await pm.increaseLiquidity({

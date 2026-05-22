@@ -82,11 +82,11 @@ export function LiquidityPanel({ addrs, poolState, getSigner, account, onStatus 
       // Approve if needed
       if (d0 > 0n) {
         const al0 = await t0.allowance(account, addrs.POSITION_MANAGER);
-        if (al0 < d0) { onStatus('Approving token0...'); await (await t0.approve(addrs.POSITION_MANAGER, d0 * 10n)).wait(); }
+        if (al0 < d0) { onStatus('Approving token0...'); await (await t0.approve(addrs.POSITION_MANAGER, d0)).wait(); }
       }
       if (d1 > 0n) {
         const al1 = await t1.allowance(account, addrs.POSITION_MANAGER);
-        if (al1 < d1) { onStatus('Approving token1...'); await (await t1.approve(addrs.POSITION_MANAGER, d1 * 10n)).wait(); }
+        if (al1 < d1) { onStatus('Approving token1...'); await (await t1.approve(addrs.POSITION_MANAGER, d1)).wait(); }
       }
 
       onStatus('Minting position...');

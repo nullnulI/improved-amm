@@ -3,7 +3,7 @@ import { Contract, parseUnits, formatUnits, solidityPacked } from 'ethers';
 import {
   SWAP_ROUTER_ABI, QUOTER_ABI, ERC20_ABI,
   FEE_TIERS, SLIPPAGE_PRESETS,
-  fmtPrice, deadline,
+  fmtPrice, deadline, signPermit,
 } from '../constants.js';
 
 const MODES = [
@@ -24,6 +24,7 @@ export function SwapPanel({ addrs, poolState, getSigner, account, onStatus }) {
   const [busy, setBusy]             = useState(false);
   const [balanceIn, setBalIn]       = useState(null);
   const [approved, setApproved]     = useState(false);
+  const [usePermit, setUsePermit]   = useState(true);
 
   // Null-safe derivations so the effect below runs on every render, keeping hook
   // order stable (Rules of Hooks). The early return must come after all hooks.
@@ -104,7 +105,7 @@ export function SwapPanel({ addrs, poolState, getSigner, account, onStatus }) {
       const signer = await getSigner();
       const token  = new Contract(tokenIn, ERC20_ABI, signer);
       const parsed = parseUnits(amountIn || '0', 18);
-      await (await token.approve(addrs.SWAP_ROUTER, parsed * 10n)).wait();
+      await (await token.approve(addrs.SWAP_ROUTER, parsed)).wait();
       setApproved(true);
       onStatus('Approval confirmed.');
     } catch (e) {
@@ -114,50 +115,55 @@ export function SwapPanel({ addrs, poolState, getSigner, account, onStatus }) {
 
   async function swap() {
     if (!amountIn) return;
+    if (mode === 'multi' && (!midToken || !midToken.startsWith('0x'))) {
+      onStatus('Enter a valid intermediate token address.');
+      return;
+    }
     setBusy(true);
-    onStatus('Executing swap...');
     try {
-      const signer  = await getSigner();
-      const token   = new Contract(tokenIn, ERC20_ABI, signer);
-      const router  = new Contract(addrs.SWAP_ROUTER, SWAP_ROUTER_ABI, signer);
-      const parsed  = parseUnits(amountIn, 18);
-
-      const allowance = await token.allowance(account, addrs.SWAP_ROUTER);
-      if (allowance < parsed) {
-        await (await token.approve(addrs.SWAP_ROUTER, parsed * 10n)).wait();
-      }
-
+      const signer = await getSigner();
+      const router = new Contract(addrs.SWAP_ROUTER, SWAP_ROUTER_ABI, signer);
+      const parsed = parseUnits(amountIn, 18);
       const minOut = quote ? quote.minOut : 1n;
-      let receipt;
+      const dl     = deadline();
 
-      if (mode === 'single') {
-        const tx = await router.exactInputSingle({
-          tokenIn, tokenOut, fee: feeTier,
-          recipient: account,
-          deadline: deadline(),
-          amountIn: parsed,
-          amountOutMinimum: minOut,
-          sqrtPriceLimitX96: 0n,
-        });
-        receipt = await tx.wait();
-      } else {
-        if (!midToken || !midToken.startsWith('0x')) {
-          onStatus('Enter a valid intermediate token address.');
-          setBusy(false);
-          return;
-        }
-        const path = solidityPacked(
+      // Build the swap action params once; encoded for multicall or sent directly.
+      const singleParams = {
+        tokenIn, tokenOut, fee: feeTier, recipient: account,
+        deadline: dl, amountIn: parsed, amountOutMinimum: minOut, sqrtPriceLimitX96: 0n,
+      };
+      const multiParams = mode === 'multi' ? {
+        path: solidityPacked(
           ['address', 'uint24', 'address', 'uint24', 'address'],
           [tokenIn, feeTier, midToken, feeTier2, tokenOut]
-        );
-        const tx = await router.exactInput({
-          path,
-          recipient: account,
-          deadline: deadline(),
-          amountIn: parsed,
-          amountOutMinimum: minOut,
-        });
-        receipt = await tx.wait();
+        ),
+        recipient: account, deadline: dl, amountIn: parsed, amountOutMinimum: minOut,
+      } : null;
+
+      let receipt;
+      if (usePermit) {
+        // 1-tx path: sign an EIP-2612 permit, then multicall(selfPermit, swap).
+        onStatus('Sign the permit in your wallet…');
+        const sig = await signPermit(signer, tokenIn, account, addrs.SWAP_ROUTER, parsed, dl);
+        const permitData = router.interface.encodeFunctionData('selfPermit', [
+          tokenIn, parsed, dl, sig.v, sig.r, sig.s,
+        ]);
+        const actionData = mode === 'single'
+          ? router.interface.encodeFunctionData('exactInputSingle', [singleParams])
+          : router.interface.encodeFunctionData('exactInput', [multiParams]);
+        onStatus('Submitting 1-tx permit swap…');
+        receipt = await (await router.multicall([permitData, actionData])).wait();
+      } else {
+        // Classic path: ensure exact allowance, then send the swap directly.
+        const token = new Contract(tokenIn, ERC20_ABI, signer);
+        if ((await token.allowance(account, addrs.SWAP_ROUTER)) < parsed) {
+          onStatus('Approving token…');
+          await (await token.approve(addrs.SWAP_ROUTER, parsed)).wait();
+        }
+        onStatus('Executing swap…');
+        receipt = mode === 'single'
+          ? await (await router.exactInputSingle(singleParams)).wait()
+          : await (await router.exactInput(multiParams)).wait();
       }
 
       setQuote(null);
@@ -178,7 +184,7 @@ export function SwapPanel({ addrs, poolState, getSigner, account, onStatus }) {
   })();
 
   const balFmt = balanceIn !== null ? (+formatUnits(balanceIn, 18)).toLocaleString(undefined, { maximumFractionDigits: 4 }) : null;
-  const needsApproval = amountIn && !approved;
+  const needsApproval = !usePermit && amountIn && !approved;
 
   return (
     <div className="panel">
@@ -359,6 +365,23 @@ export function SwapPanel({ addrs, poolState, getSigner, account, onStatus }) {
         </div>
       )}
 
+      {/* EIP-2612 permit toggle */}
+      <div className="field-group">
+        <label className="field-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={usePermit}
+            onChange={(e) => setUsePermit(e.target.checked)}
+          />
+          EIP-2612 permit — single transaction, no separate approval
+        </label>
+        <p className="hint">
+          {usePermit
+            ? 'Sign an off-chain permit, then one multicall runs selfPermit + swap. No approve tx.'
+            : 'Classic flow: a separate exact-amount approval tx is sent before the swap when needed.'}
+        </p>
+      </div>
+
       {/* Action buttons */}
       <div className="actions">
         <button onClick={getQuote} disabled={busy || !amountIn}>Quote</button>
@@ -368,7 +391,7 @@ export function SwapPanel({ addrs, poolState, getSigner, account, onStatus }) {
           </button>
         )}
         <button onClick={swap} disabled={busy || !amountIn} className="btn-primary">
-          {busy ? 'Processing…' : 'Swap'}
+          {busy ? 'Processing…' : (usePermit ? 'Swap (1-tx permit)' : 'Swap')}
         </button>
       </div>
     </div>

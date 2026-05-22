@@ -1,3 +1,5 @@
+import { Contract, Signature } from 'ethers';
+
 // ── Chain ──────────────────────────────────────────────────────────────────────
 export const REQUIRED_CHAIN_ID = 31337n;
 
@@ -96,6 +98,7 @@ export const ERC20_ABI = [
   'function balanceOf(address) view returns (uint256)',
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
+  'function nonces(address owner) view returns (uint256)',
   'function mint(address to, uint256 amount)',
 ];
 
@@ -148,6 +151,9 @@ export const SWAP_ROUTER_ABI = [
   'function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut)',
   'function exactInput(tuple(bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum) params) returns (uint256 amountOut)',
   'function exactOutputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96) params) returns (uint256 amountIn)',
+  'function selfPermit(address token, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)',
+  'function selfPermitIfNecessary(address token, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)',
+  'function multicall(bytes[] data) returns (bytes[] results)',
 ];
 
 export const QUOTER_ABI = [
@@ -161,3 +167,28 @@ export const DYNAMIC_FEE_ADVISOR_ABI = [
   'function getOptimalPool(address tokenA, address tokenB, uint24 refFee) view returns (address optPool, uint24 optFee)',
   'function isOptimalFeeTier(address tokenA, address tokenB, uint24 refFee, uint24 checkFee) view returns (bool)',
 ];
+
+// ── EIP-2612 permit signing ─────────────────────────────────────────────────────
+// Produces a { v, r, s } signature authorizing `spender` to spend `value` of `token`
+// on behalf of `owner`. OZ's ERC20Permit uses EIP-712 domain version "1".
+export async function signPermit(signer, token, owner, spender, value, deadlineTs) {
+  const erc20 = new Contract(token, ERC20_ABI, signer);
+  const [name, nonce, network] = await Promise.all([
+    erc20.name(),
+    erc20.nonces(owner),
+    signer.provider.getNetwork(),
+  ]);
+  const domain = { name, version: '1', chainId: network.chainId, verifyingContract: token };
+  const types = {
+    Permit: [
+      { name: 'owner',    type: 'address' },
+      { name: 'spender',  type: 'address' },
+      { name: 'value',    type: 'uint256' },
+      { name: 'nonce',    type: 'uint256' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+  };
+  const message = { owner, spender, value, nonce, deadline: deadlineTs };
+  const sig = await signer.signTypedData(domain, types, message);
+  return Signature.from(sig);
+}

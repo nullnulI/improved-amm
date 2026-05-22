@@ -4,17 +4,21 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/Multicall.sol";
 import "../core/Pool.sol";
 import "../core/interfaces/IPoolFactory.sol";
 import "../core/interfaces/IPoolMintCallback.sol";
 import "../libraries/TickMath.sol";
 import "../libraries/LiquidityAmounts.sol";
 import "../libraries/SafeCast.sol";
+import "./base/SelfPermit.sol";
 
 /// @title NFT Position Manager
 /// @notice Wraps concentrated liquidity positions as ERC-721 tokens.
 ///         Each token ID represents a unique (pool, tickLower, tickUpper, owner) position.
-contract PositionManager is ERC721, IPoolMintCallback {
+/// @dev    Inherits {Multicall} + {SelfPermit} so permit signatures for token0/token1 and a
+///         mint/increaseLiquidity can be batched into a single transaction.
+contract PositionManager is ERC721, IPoolMintCallback, Multicall, SelfPermit {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
 

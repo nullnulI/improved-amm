@@ -52,6 +52,30 @@ Total gas across all 11 benchmarked operations: **~5,655,593**
 
 ---
 
+## Batch Operations: EIP-2612 Permit + Multicall
+
+`SwapRouter` and `PositionManager` inherit `Multicall` + `SelfPermit`, so an off-chain
+EIP-2612 signature and the on-chain action execute in **one transaction** instead of a
+separate `approve` transaction followed by the action. Measured by
+`contracts/test/gas/PermitGas.test.js`:
+
+| Flow | Classic (separate approve) | Permit multicall | Saved |
+|---|---:|---:|---:|
+| Swap: `approve` + `exactInputSingle` | 180,244 (2 tx) | 149,535 (1 tx) | **30,709 (~17%)** |
+| Mint: `approve` ×2 + `mint` | 405,911 (3 tx) | 364,606 (1 tx) | **41,305 (~10%)** |
+
+The saving comes from eliminating each standalone `approve` transaction's ~21,000-gas
+intrinsic cost (plus its calldata), partially offset by the permit's `ecrecover` and
+nonce SSTORE. The mint figures use pre-initialized ticks so the comparison isolates the
+batching effect rather than one-time tick-initialization cost.
+
+Beyond raw gas, batching gives a single wallet confirmation and an atomic
+approve-and-act (the allowance never lingers between transactions). The frontend exposes
+this via an **EIP-2612 permit** toggle on the Swap panel; the classic fallback path now
+approves the **exact** amount instead of an over-approval.
+
+---
+
 ## Key Trade-offs
 
 | Choice | Pro | Con |
@@ -67,5 +91,5 @@ Total gas across all 11 benchmarked operations: **~5,655,593**
 ## Further Opportunities
 
 - **Packing `protocolFee` into `Slot0`** would save one SLOAD per swap when the protocol fee is active
-- **Multicall** on the PositionManager would let LPs mint + increase in one tx
+- ~~**Multicall** on the PositionManager would let LPs mint + increase in one tx~~ — **implemented** via `Multicall` + `SelfPermit` (see *Batch Operations* above)
 - **TWAP cardinality warm-up** (calling `increaseObservationCardinalityNext` at deployment) saves gas on the first oracle write

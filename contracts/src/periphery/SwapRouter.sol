@@ -3,15 +3,19 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/Multicall.sol";
 import "../core/Pool.sol";
 import "../core/interfaces/IPoolFactory.sol";
 import "../core/interfaces/IPoolSwapCallback.sol";
 import "../libraries/TickMath.sol";
 import "../libraries/SafeCast.sol";
+import "./base/SelfPermit.sol";
 
 /// @title Swap Router
 /// @notice Stateless router for single-hop and multi-hop swaps through concentrated liquidity pools.
-contract SwapRouter is IPoolSwapCallback {
+/// @dev    Inherits {Multicall} + {SelfPermit} so a permit signature and a swap can be
+///         batched into a single transaction (no separate approve tx needed).
+contract SwapRouter is IPoolSwapCallback, Multicall, SelfPermit {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
 
