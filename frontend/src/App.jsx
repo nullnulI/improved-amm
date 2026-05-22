@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Contract, formatUnits } from 'ethers';
 import { createRoot } from 'react-dom/client';
 import { useWallet } from './hooks/useWallet.js';
@@ -7,6 +7,7 @@ import { SwapPanel }      from './components/SwapPanel.jsx';
 import { LiquidityPanel } from './components/LiquidityPanel.jsx';
 import { PositionsPanel } from './components/PositionsPanel.jsx';
 import { AnalyticsPanel } from './components/AnalyticsPanel.jsx';
+import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import { FACTORY_ABI, ERC20_ABI, fmt } from './constants.js';
 import './styles.css';
 
@@ -232,4 +233,8 @@ function PoolStat({ label, value }) {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);

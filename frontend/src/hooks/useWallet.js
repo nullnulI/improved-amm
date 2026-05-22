@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { BrowserProvider } from 'ethers';
 import { REQUIRED_CHAIN_ID } from '../constants.js';
 
@@ -9,6 +9,20 @@ export function useWallet() {
   const provider = useMemo(() => {
     if (typeof window === 'undefined' || !window.ethereum) return null;
     return new BrowserProvider(window.ethereum);
+  }, []);
+
+  // MetaMask network/account changes invalidate the cached provider — reload so
+  // ethers rebuilds it against the current chain instead of throwing "network changed".
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.ethereum) return;
+    const onChainChanged = () => window.location.reload();
+    const onAccountsChanged = (accounts) => setAccount(accounts?.[0] ?? '');
+    window.ethereum.on('chainChanged', onChainChanged);
+    window.ethereum.on('accountsChanged', onAccountsChanged);
+    return () => {
+      window.ethereum.removeListener('chainChanged', onChainChanged);
+      window.ethereum.removeListener('accountsChanged', onAccountsChanged);
+    };
   }, []);
 
   const connect = useCallback(async () => {

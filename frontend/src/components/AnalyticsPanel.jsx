@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Contract, formatUnits } from 'ethers';
 import {
   LineChart, Line, BarChart, Bar, Cell,
@@ -14,11 +14,11 @@ export function AnalyticsPanel({ poolState, swapHistory, mintHistory, addrs, get
   const [protocolFeeInput, setProtocolFeeInput] = useState('');
   const [pfBusy, setPfBusy]   = useState(false);
 
-  if (!poolState) return <div className="panel"><p className="muted">Load a pool first.</p></div>;
-
+  // Null-safe destructure so the useMemo hooks below run on every render (Rules of
+  // Hooks). The early return is placed after all hooks, before non-hook derivations.
   const { price, symbol0, symbol1, twap5m, twap30m, tick: currentTick, fee,
           feeGrowthGlobal0X128, feeGrowthGlobal1X128,
-          protocolFeeDenominator, protocolFeeToken0, protocolFeeToken1 } = poolState;
+          protocolFeeDenominator, protocolFeeToken0, protocolFeeToken1 } = poolState || {};
 
   async function setProtocolFee() {
     const denom = parseInt(protocolFeeInput, 10);
@@ -108,6 +108,8 @@ export function AnalyticsPanel({ poolState, swapHistory, mintHistory, addrs, get
     if (vol > 0.5) return { level: 'Medium', color: '#f59e0b', tier: '0.30%', vol };
     return           { level: 'Low',    color: '#22c55e', tier: '0.05%', vol };
   }, [twap5m, twap30m]);
+
+  if (!poolState) return <div className="panel"><p className="muted">Load a pool first.</p></div>;
 
   // ── IL calculator ────────────────────────────────────────────────────────────
   const entry   = parseFloat(ilEntry) || price;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Contract, parseUnits, formatUnits, solidityPacked } from 'ethers';
 import {
   SWAP_ROUTER_ABI, QUOTER_ABI, ERC20_ABI,
@@ -25,9 +25,9 @@ export function SwapPanel({ addrs, poolState, getSigner, account, onStatus }) {
   const [balanceIn, setBalIn]       = useState(null);
   const [approved, setApproved]     = useState(false);
 
-  if (!poolState) return <div className="panel"><p className="muted">Load a pool first.</p></div>;
-
-  const { token0, token1, symbol0, symbol1, price } = poolState;
+  // Null-safe derivations so the effect below runs on every render, keeping hook
+  // order stable (Rules of Hooks). The early return must come after all hooks.
+  const { token0, token1, symbol0, symbol1, price } = poolState || {};
   const tokenIn  = zeroForOne ? token0 : token1;
   const tokenOut = zeroForOne ? token1 : token0;
   const symIn    = zeroForOne ? symbol0 : symbol1;
@@ -55,6 +55,8 @@ export function SwapPanel({ addrs, poolState, getSigner, account, onStatus }) {
     load();
     return () => { cancelled = true; };
   }, [account, tokenIn, addrs.SWAP_ROUTER, amountIn, zeroForOne]);
+
+  if (!poolState) return <div className="panel"><p className="muted">Load a pool first.</p></div>;
 
   async function getQuote() {
     if (!amountIn || isNaN(+amountIn) || +amountIn <= 0) return;
