@@ -1,27 +1,84 @@
-const hre = require("hardhat");
+const { ethers } = require("hardhat");
 
 async function main() {
-  const [deployer] = await hre.ethers.getSigners();
-  const parse = hre.ethers.parseEther;
+  const [deployer] = await ethers.getSigners();
+  console.log("Deploying with:", deployer.address);
 
-  const MockERC20 = await hre.ethers.getContractFactory("MockERC20");
-  const tokenA = await MockERC20.deploy("Course Token A", "CTA");
-  const tokenB = await MockERC20.deploy("Course Token B", "CTB");
+  // ── Core ────────────────────────────────────────────────────────────────────
+  const PoolFactory = await ethers.getContractFactory("PoolFactory");
+  const factory = await PoolFactory.deploy();
+  await factory.waitForDeployment();
+  console.log("PoolFactory:      ", factory.target);
 
-  const ImprovedAMM = await hre.ethers.getContractFactory("ImprovedAMM");
-  const amm = await ImprovedAMM.deploy(tokenA.target, tokenB.target, parse("100"), parse("100"));
+  // ── Periphery ───────────────────────────────────────────────────────────────
+  const PM = await ethers.getContractFactory("PositionManager");
+  const pm = await PM.deploy(factory.target);
+  await pm.waitForDeployment();
+  console.log("PositionManager:  ", pm.target);
 
-  await tokenA.mint(deployer.address, parse("10000"));
-  await tokenB.mint(deployer.address, parse("10000"));
-  await tokenA.approve(amm.target, parse("10000"));
-  await tokenB.approve(amm.target, parse("10000"));
+  const Router = await ethers.getContractFactory("SwapRouter");
+  const router = await Router.deploy(factory.target);
+  await router.waitForDeployment();
+  console.log("SwapRouter:       ", router.target);
 
-  console.log("Token A:", tokenA.target);
-  console.log("Token B:", tokenB.target);
-  console.log("Improved AMM:", amm.target);
+  const QuoterF = await ethers.getContractFactory("Quoter");
+  const quoter = await QuoterF.deploy(factory.target);
+  await quoter.waitForDeployment();
+  console.log("Quoter:           ", quoter.target);
+
+  // ── Mock tokens ─────────────────────────────────────────────────────────────
+  const MockERC20 = await ethers.getContractFactory("MockERC20");
+  const tokenA = await MockERC20.deploy("Demo Token A", "DTA");
+  const tokenB = await MockERC20.deploy("Demo Token B", "DTB");
+  await tokenA.waitForDeployment();
+  await tokenB.waitForDeployment();
+  console.log("Token A:          ", tokenA.target);
+  console.log("Token B:          ", tokenB.target);
+
+  // ── Create 0.3% pool ────────────────────────────────────────────────────────
+  const FEE = 3000;
+  await factory.createPool(tokenA.target, tokenB.target, FEE);
+  const poolAddr = await factory.getPool(tokenA.target, tokenB.target, FEE);
+  const pool = await ethers.getContractAt("Pool", poolAddr);
+  console.log("Pool (0.3%):      ", poolAddr);
+
+  const t0 = tokenA.target.toLowerCase() < tokenB.target.toLowerCase() ? tokenA.target : tokenB.target;
+  const t1 = tokenA.target.toLowerCase() < tokenB.target.toLowerCase() ? tokenB.target : tokenA.target;
+  const token0 = await ethers.getContractAt("MockERC20", t0);
+  const token1 = await ethers.getContractAt("MockERC20", t1);
+
+  // Initialize pool at price 1:1
+  const Q96 = 2n ** 96n;
+  await pool.initialize(Q96);
+
+  // Seed initial liquidity
+  const SEED = ethers.parseEther("100000");
+  await token0.mint(deployer.address, SEED);
+  await token1.mint(deployer.address, SEED);
+  await token0.approve(pm.target, SEED);
+  await token1.approve(pm.target, SEED);
+
+  await pm.mint({
+    token0: t0, token1: t1, fee: FEE,
+    tickLower: -60 * 500, tickUpper: 60 * 500,
+    amount0Desired: ethers.parseEther("50000"),
+    amount1Desired: ethers.parseEther("50000"),
+    amount0Min: 0, amount1Min: 0,
+    recipient: deployer.address,
+    deadline: Math.floor(Date.now() / 1000) + 3600
+  });
+  console.log("Seeded liquidity — NFT position #1 minted");
+
+  console.log("\n=== Paste this JSON into the frontend Config panel ===");
+  console.log(JSON.stringify({
+    FACTORY:          factory.target,
+    POSITION_MANAGER: pm.target,
+    SWAP_ROUTER:      router.target,
+    QUOTER:           quoter.target,
+    TOKEN_A:          tokenA.target,
+    TOKEN_B:          tokenB.target,
+    POOL:             poolAddr
+  }, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+main().catch((err) => { console.error(err); process.exit(1); });

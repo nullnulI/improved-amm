@@ -1,29 +1,18 @@
-# SC6107 Improved AMM
+# SC6107 Concentrated Liquidity AMM
 
-This project implements **Option 5: Automated Market Maker with Novel Features** for the SC6107 Blockchain Development Fundamentals project.
+**Option 5: Automated Market Maker with Novel Features** — SC6107 Blockchain Development Fundamentals
 
-The MVP is a Uniswap V2-inspired constant-product AMM with:
+A full Uniswap V3-style **concentrated liquidity AMM** built from scratch in Solidity 0.8.24.
 
-- ERC-20 mock tokens for local testing.
-- LP token minting and burning for liquidity providers.
-- Add liquidity, remove liquidity, quote, and exact-input swap flows.
-- Bidirectional swaps between Token A and Token B.
-- Slippage protection through `minAmountOut`.
-- Deadline protection for stale transactions.
-- Virtual reserves as the course-project "novel" pricing feature.
-- Dynamic fees: 0.3% for normal trades and 0.5% for large trades.
-- A React/Vite demo for wallet-based interaction.
+## Features
 
-## Why This Project
-
-Standard `x * y = k` AMMs are simple and composable, but they expose traders to price impact and LPs to market risk. This project starts from the Uniswap V2 CPAMM model and adds virtual reserves plus dynamic fees to show how protocol parameters can change trading behavior.
-
-## What Makes It Novel
-
-- Virtual reserves are used in swap quotes to reduce price impact without making virtual liquidity withdrawable.
-- Dynamic fees increase from 0.3% to 0.5% for large trades, demonstrating a simple volatility/risk-aware fee model.
-- Quote details expose expected output, fee, and price impact so users can inspect trade quality before execution.
-- Dust-sized swaps that round down to zero output are rejected instead of silently taking user input.
+- **Concentrated liquidity** — LPs choose `[tickLower, tickUpper]` price ranges, maximising capital efficiency over Uni V2
+- **ERC-721 NFT positions** — each LP position is a unique, transferable NFT
+- **Three fee tiers** — 0.05% / 0.30% / 1.00% with corresponding tick spacings (10 / 60 / 200)
+- **TWAP oracle** — manipulation-resistant geometric mean price feed built into every pool
+- **Multi-hop SwapRouter** — exact-input single and multi-hop routing
+- **Gas-free Quoter** — simulate any swap without spending gas
+- **51 passing tests** — unit, integration, and pool-flow tests
 
 ## Quick Start
 
@@ -33,72 +22,79 @@ npm run compile
 npm test
 ```
 
-Run the local chain:
+Run a local chain and deploy:
 
 ```bash
+# Terminal 1
 npm run node
-```
 
-In another terminal, deploy contracts:
-
-```bash
+# Terminal 2
 npm run deploy
 ```
 
-Copy the printed Token A, Token B, and Improved AMM addresses into the frontend:
+Copy the printed addresses into `frontend/src/App.jsx`, then start the dev server:
 
 ```bash
 npm run dev
 ```
 
-Open the Vite URL, connect MetaMask to `localhost:8545` / chain ID `31337`, then run:
-
-1. Mint demo tokens.
-2. Approve the AMM.
-3. Add liquidity.
-4. Quote a swap and inspect fee / price impact / minimum received.
-5. Swap Token A for Token B, then switch direction and swap Token B for Token A.
-6. Remove liquidity.
-
 ## Project Structure
 
-```text
-improved-amm/
-  README.md
-contracts/
-  src/
-    ImprovedAMM.sol
-    MockERC20.sol
+```
+contracts/src/
+  libraries/              Math primitives
+    TickMath.sol          tick ↔ sqrtPrice (Q64.96)
+    FullMath.sol          512-bit mulDiv
+    SqrtPriceMath.sol     token deltas from price changes
+    LiquidityAmounts.sol  liquidity ↔ token amounts
+    SwapMath.sol          single-step swap computation
+    TickBitmap.sol        packed tick initialized-flag bitmap
+    Tick.sol              per-tick fee tracking
+    Position.sol          per-position fee accumulation
+    Oracle.sol            TWAP observation ring-buffer
+    LiquidityMath.sol     uint128 add/subtract with delta
+    SafeCast.sol          safe integer down-casts
+  core/
+    Pool.sol              concentrated liquidity engine (mint/burn/swap/collect)
+    PoolFactory.sol       deploys and registers pools
+    interfaces/           callback interfaces
+  periphery/
+    PositionManager.sol   ERC-721 NFT LP position manager
+    SwapRouter.sol        single-hop and multi-hop swap router
+    Quoter.sol            gas-free price quoter
+  MockERC20.sol           mintable test token
+  ImprovedAMM.sol         V1 baseline (virtual reserves + dynamic fees)
   test/
-    ImprovedAMM.test.js
-frontend/
-  index.html
-  src/
-    App.jsx
-    styles.css
+    TickMathTest.sol      test harness for TickMath library
+
+contracts/test/
+  ImprovedAMM.test.js     V1 tests
+  Pool.test.js            concentrated liquidity pool tests
+  integration/
+    FullFlow.test.js      end-to-end: factory → LP → swap → collect
+  libraries/
+    TickMath.test.js      tick math unit tests
+
 docs/
-  architecture.md
+  architecture.md         full system design, math, security
   security-analysis.md
   gas-optimization.md
-  presentation.md
-scripts/
-  deploy.js
-hardhat.config.js
-package.json
-package-lock.json
 ```
 
-## Five-Sentence Presentation Story
+## Architecture
 
-1. We build on Uniswap V2's constant-product AMM model.
-2. The pool uses token reserves to determine price.
-3. Each swap changes reserves, so large trades create price impact and slippage.
-4. We add `minAmountOut` and `deadline` to reduce stale execution and slippage risk.
-5. We introduce virtual reserves and dynamic fees as our novel AMM features.
+See [`docs/architecture.md`](docs/architecture.md) for the complete design including math, fee accounting, tick crossing, and TWAP oracle.
 
-## Known Limitations
+## Team Contributions
 
-- This is an educational AMM, not a production-ready protocol.
-- It does not use an external oracle.
-- Virtual reserve updates are intentionally simple for demo purposes.
-- The frontend targets local demo flow, not a full production DEX UX.
+| Member | Scope |
+|--------|-------|
+| Person 1 | V1 AMM baseline (`ImprovedAMM.sol`), project scaffold, Hardhat config |
+| Person 2 | Math libraries (TickMath, FullMath, LiquidityAmounts, SwapMath, TickBitmap) + library unit tests |
+| Person 3 | `Pool.sol` core logic + `PoolFactory.sol` + Pool integration tests |
+| Person 4 | `PositionManager.sol` (ERC-721), `SwapRouter.sol`, `Quoter.sol` + full integration tests |
+| Person 5 | React frontend, analytics dashboard, deployment scripts, documentation |
+
+## Attribution
+
+Math library constants (TickMath magic ratios, FullMath 512-bit algorithm) are ported from [Uniswap V3 Core](https://github.com/Uniswap/v3-core) (MIT License). All contract logic and architecture are independently implemented for this project.
