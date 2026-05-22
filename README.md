@@ -54,21 +54,29 @@ Open the Vite URL, connect MetaMask to `localhost:8545` / chain ID `31337`, then
 ## Project Structure
 
 ```text
+improved-amm/
+  README.md
 contracts/
-  ImprovedAMM.sol
-  MockERC20.sol
-test/
-  ImprovedAMM.test.js
-scripts/
-  deploy.js
-src/
-  App.jsx
-  styles.css
+  src/
+    ImprovedAMM.sol
+    MockERC20.sol
+  test/
+    ImprovedAMM.test.js
+frontend/
+  index.html
+  src/
+    App.jsx
+    styles.css
 docs/
   architecture.md
   security-analysis.md
   gas-optimization.md
   presentation.md
+scripts/
+  deploy.js
+hardhat.config.js
+package.json
+package-lock.json
 ```
 
 ## Five-Sentence Presentation Story

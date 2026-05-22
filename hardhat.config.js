@@ -10,6 +10,10 @@ module.exports = {
       }
     }
   },
+  paths: {
+    sources: "contracts/src",
+    tests: "contracts/test"
+  },
   networks: {
     hardhat: {
       chainId: 31337
