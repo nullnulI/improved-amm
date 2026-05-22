@@ -133,7 +133,8 @@ export const POSITION_MANAGER_ABI = [
   'function increaseLiquidity(tuple(uint256 tokenId, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, uint256 deadline) params) returns (uint128 liquidity, uint256 amount0, uint256 amount1)',
   'function decreaseLiquidity(tuple(uint256 tokenId, uint128 liquidity, uint256 amount0Min, uint256 amount1Min, uint256 deadline) params) returns (uint256 amount0, uint256 amount1)',
   'function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max) params) returns (uint256 amount0, uint256 amount1)',
-  'function positions(uint256 tokenId) view returns (tuple(address pool, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1))',
+  'function positions(uint256 tokenId) view returns (tuple(address pool, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1, uint256 mintBlock))',
+  'function getPositionAmounts(uint256 tokenId) view returns (uint256 amount0, uint256 amount1)',
   'function totalSupply() view returns (uint256)',
   'function ownerOf(uint256 tokenId) view returns (address)',
   'function balanceOf(address owner) view returns (uint256)',
@@ -146,8 +147,17 @@ export const POSITION_MANAGER_ABI = [
 export const SWAP_ROUTER_ABI = [
   'function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut)',
   'function exactInput(tuple(bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum) params) returns (uint256 amountOut)',
+  'function exactOutputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96) params) returns (uint256 amountIn)',
 ];
 
 export const QUOTER_ABI = [
   'function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) returns (uint256 amountOut)',
+  'function quoteExactOutputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96) returns (uint256 amountIn)',
+];
+
+export const DYNAMIC_FEE_ADVISOR_ABI = [
+  'function factory() view returns (address)',
+  'function getVolatilityReport(address tokenA, address tokenB, uint24 refFee) view returns (tuple(int24 twap5m, int24 twap30m, int24 tickDivergence, uint24 recommendedFeeTier, uint8 volatilityLevel, bool hasSufficientHistory) report)',
+  'function getOptimalPool(address tokenA, address tokenB, uint24 refFee) view returns (address optPool, uint24 optFee)',
+  'function isOptimalFeeTier(address tokenA, address tokenB, uint24 refFee, uint24 checkFee) view returns (bool)',
 ];

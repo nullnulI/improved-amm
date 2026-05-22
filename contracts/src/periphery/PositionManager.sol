@@ -29,6 +29,7 @@ contract PositionManager is ERC721, IPoolMintCallback {
         uint256 feeGrowthInside1LastX128;
         uint128 tokensOwed0;
         uint128 tokensOwed1;
+        uint256 mintBlock;  // block number when liquidity was last added (JIT protection)
     }
 
     uint256 private _nextTokenId = 1;
@@ -45,6 +46,9 @@ contract PositionManager is ERC721, IPoolMintCallback {
     error ZeroLiquidity();
     error SlippageExceeded();
     error PoolNotFound();
+    /// @notice Thrown when a liquidity provider attempts to collect fees in the same block
+    ///         they added liquidity — prevents JIT (Just-In-Time) liquidity extraction attacks.
+    error JITProtection();
 
     struct MintParams {
         address token0;
@@ -177,7 +181,8 @@ contract PositionManager is ERC721, IPoolMintCallback {
             feeGrowthInside0LastX128:   fg0,
             feeGrowthInside1LastX128:   fg1,
             tokensOwed0:                0,
-            tokensOwed1:                0
+            tokensOwed1:                0,
+            mintBlock:                  block.number
         });
 
         emit IncreaseLiquidity(tokenId, liquidity, amount0, amount1);
@@ -220,7 +225,8 @@ contract PositionManager is ERC721, IPoolMintCallback {
         if (amount0 < params.amount0Min || amount1 < params.amount1Min) revert SlippageExceeded();
 
         _syncFees(pos, pool);
-        pos.liquidity += liquidity;
+        pos.liquidity  += liquidity;
+        pos.mintBlock   = block.number;  // reset JIT window on each liquidity increase
         emit IncreaseLiquidity(params.tokenId, liquidity, amount0, amount1);
     }
 
@@ -254,6 +260,7 @@ contract PositionManager is ERC721, IPoolMintCallback {
     // ── Collect fees ───────────────────────────────────────────────────────────
     /// @notice Collect up to `amount0Max`/`amount1Max` of accrued fees and burned tokens.
     ///         Triggers a burn(0) on the pool to sync fee snapshots before collecting.
+    ///         JIT protection: reverts if called in the same block as the most recent mint.
     /// @param params  CollectParams with tokenId, recipient, and maximum amounts
     /// @return amount0 Token0 sent to recipient
     /// @return amount1 Token1 sent to recipient
@@ -263,6 +270,10 @@ contract PositionManager is ERC721, IPoolMintCallback {
         returns (uint256 amount0, uint256 amount1)
     {
         PositionData storage pos = _positions[params.tokenId];
+        // JIT protection: disallow same-block fee collection after adding liquidity.
+        // Bots that deposit liquidity, capture a swap's fees, and withdraw in a single
+        // atomic bundle (flash-LP) are prevented from collecting fees in the same block.
+        if (block.number <= pos.mintBlock) revert JITProtection();
         Pool pool = Pool(pos.pool);
         address recipient = params.recipient == address(0) ? address(this) : params.recipient;
 
@@ -292,6 +303,25 @@ contract PositionManager is ERC721, IPoolMintCallback {
     /// @return Count of minted token IDs
     function totalSupply() external view returns (uint256) {
         return _nextTokenId - 1;
+    }
+
+    /// @notice Calculate the current token0/token1 amounts represented by a position's liquidity.
+    /// @dev    Uses the pool's current sqrtPriceX96 with three price-range branches:
+    ///         price below range → only token0; in range → both tokens; above range → only token1.
+    /// @param tokenId The ERC-721 position token ID
+    /// @return amount0 Current token0 amount for the position's liquidity
+    /// @return amount1 Current token1 amount for the position's liquidity
+    function getPositionAmounts(uint256 tokenId)
+        external view returns (uint256 amount0, uint256 amount1)
+    {
+        PositionData storage pos = _positions[tokenId];
+        (uint160 sqrtPriceX96,,,,,) = _getSlot0(Pool(pos.pool));
+        (amount0, amount1) = LiquidityAmounts.getAmountsForLiquidity(
+            sqrtPriceX96,
+            TickMath.getSqrtRatioAtTick(pos.tickLower),
+            TickMath.getSqrtRatioAtTick(pos.tickUpper),
+            pos.liquidity
+        );
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────

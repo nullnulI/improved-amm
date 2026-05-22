@@ -1,11 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Contract, formatUnits } from 'ethers';
 import {
   LineChart, Line, BarChart, Bar, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine, ComposedChart, Area,
 } from 'recharts';
-import { computeIL, tickToPrice, fmtPrice, fmt, FEE_TIERS, FACTORY_ABI, POOL_ABI } from '../constants.js';
+import { computeIL, tickToPrice, fmtPrice, fmt, FEE_TIERS, FACTORY_ABI, POOL_ABI, DYNAMIC_FEE_ADVISOR_ABI } from '../constants.js';
 
 export function AnalyticsPanel({ poolState, swapHistory, mintHistory, addrs, getSigner, account, onStatus }) {
   const [ilEntry, setIlEntry] = useState('');
@@ -13,12 +13,30 @@ export function AnalyticsPanel({ poolState, swapHistory, mintHistory, addrs, get
   const [ilUpper, setIlUpper] = useState('');
   const [protocolFeeInput, setProtocolFeeInput] = useState('');
   const [pfBusy, setPfBusy]   = useState(false);
+  const [onChainFeeReport, setOnChainFeeReport] = useState(null);
 
   // Null-safe destructure so the useMemo hooks below run on every render (Rules of
   // Hooks). The early return is placed after all hooks, before non-hook derivations.
   const { price, symbol0, symbol1, twap5m, twap30m, tick: currentTick, fee,
           feeGrowthGlobal0X128, feeGrowthGlobal1X128,
-          protocolFeeDenominator, protocolFeeToken0, protocolFeeToken1 } = poolState || {};
+          protocolFeeDenominator, protocolFeeToken0, protocolFeeToken1,
+          token0, token1 } = poolState || {};
+
+  // ── On-chain DynamicFeeAdvisor query ─────────────────────────────────────
+  useEffect(() => {
+    if (!addrs?.DYNAMIC_FEE_ADVISOR || !token0 || !token1 || !fee) return;
+    let cancelled = false;
+    async function queryAdvisor() {
+      try {
+        const signer = await getSigner();
+        const advisor = new Contract(addrs.DYNAMIC_FEE_ADVISOR, DYNAMIC_FEE_ADVISOR_ABI, signer);
+        const report = await advisor.getVolatilityReport(token0, token1, fee);
+        if (!cancelled) setOnChainFeeReport(report);
+      } catch (_) { /* advisor not deployed or no pool */ }
+    }
+    queryAdvisor();
+    return () => { cancelled = true; };
+  }, [addrs?.DYNAMIC_FEE_ADVISOR, token0, token1, fee]);
 
   async function setProtocolFee() {
     const denom = parseInt(protocolFeeInput, 10);
@@ -140,6 +158,34 @@ export function AnalyticsPanel({ poolState, swapHistory, mintHistory, addrs, get
           </div>
         )}
       </section>
+
+      {/* ── On-chain DynamicFeeAdvisor ── */}
+      {onChainFeeReport && (
+        <section className="analytics-section">
+          <h3>On-Chain Fee Advisor <span style={{ fontSize: 11, color: '#64748b', fontWeight: 400 }}>(DynamicFeeAdvisor contract)</span></h3>
+          {(() => {
+            const lvlLabels = ['Low', 'Medium', 'High'];
+            const lvlColors = ['#22c55e', '#f59e0b', '#ef4444'];
+            const lvl = Number(onChainFeeReport.volatilityLevel);
+            const feePct = (Number(onChainFeeReport.recommendedFeeTier) / 10000).toFixed(2);
+            const color = lvlColors[lvl] || '#64748b';
+            return (
+              <div className="vol-hint" style={{ borderLeftColor: color }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong style={{ color }}>Volatility: {lvlLabels[lvl]}</strong>
+                  <span className="muted">Tick divergence: {onChainFeeReport.tickDivergence.toString()}</span>
+                </div>
+                <p style={{ marginTop: 4, fontWeight: 700 }}>On-chain Recommended: {feePct}% fee tier</p>
+                <p className="hint" style={{ marginTop: 4 }}>
+                  {onChainFeeReport.hasSufficientHistory
+                    ? 'Based on 5-min vs 30-min TWAP from the oracle.'
+                    : 'Insufficient TWAP history — using spot price fallback.'}
+                </p>
+              </div>
+            );
+          })()}
+        </section>
+      )}
 
       {/* ── Dynamic fee recommendation ── */}
       {volatilityHint && (

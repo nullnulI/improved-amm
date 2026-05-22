@@ -26,6 +26,11 @@ async function main() {
   await quoter.waitForDeployment();
   console.log("Quoter:           ", quoter.target);
 
+  const AdvisorF = await ethers.getContractFactory("DynamicFeeAdvisor");
+  const advisor = await AdvisorF.deploy(factory.target);
+  await advisor.waitForDeployment();
+  console.log("DynamicFeeAdvisor:", advisor.target);
+
   // ── Mock tokens ─────────────────────────────────────────────────────────────
   const MockERC20 = await ethers.getContractFactory("MockERC20");
   const tokenA = await MockERC20.deploy("Demo Token A", "DTA");
@@ -71,13 +76,14 @@ async function main() {
 
   console.log("\n=== Paste this JSON into the frontend Config panel ===");
   console.log(JSON.stringify({
-    FACTORY:          factory.target,
-    POSITION_MANAGER: pm.target,
-    SWAP_ROUTER:      router.target,
-    QUOTER:           quoter.target,
-    TOKEN_A:          tokenA.target,
-    TOKEN_B:          tokenB.target,
-    POOL:             poolAddr
+    FACTORY:              factory.target,
+    POSITION_MANAGER:     pm.target,
+    SWAP_ROUTER:          router.target,
+    QUOTER:               quoter.target,
+    DYNAMIC_FEE_ADVISOR:  advisor.target,
+    TOKEN_A:              tokenA.target,
+    TOKEN_B:              tokenB.target,
+    POOL:                 poolAddr
   }, null, 2));
 }
 
