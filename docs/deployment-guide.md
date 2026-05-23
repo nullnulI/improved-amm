@@ -62,8 +62,10 @@ At the end it prints:
   "POSITION_MANAGER": "0x...",
   "SWAP_ROUTER": "0x...",
   "QUOTER": "0x...",
+  "DYNAMIC_FEE_ADVISOR": "0x...",
   "TOKEN_A": "0x...",
-  "TOKEN_B": "0x..."
+  "TOKEN_B": "0x...",
+  "POOL": "0x..."
 }
 ```
 
@@ -74,7 +76,7 @@ npm test
 # or: npx hardhat test
 ```
 
-Expected: **84 passing** across unit, integration, fuzz/invariant, and gas report tests.
+Expected: **173 passing** across unit, integration, fuzz/invariant, gas, edge-case, permit, and library tests.
 
 ### 6. Start the frontend
 
@@ -105,32 +107,46 @@ If you restart the Hardhat node, all state is lost. Simply run `npm run deploy` 
 
 ---
 
-## Production Deployment (Testnet / Mainnet)
+## Sepolia Deployment
 
 > The contracts are not audited. Do not deploy with real funds.
 
-1. Configure a network in `hardhat.config.js`:
+1. Export deployment credentials:
 
-```js
-networks: {
-  sepolia: {
-    url: process.env.SEPOLIA_RPC_URL,
-    accounts: [process.env.PRIVATE_KEY],
-  }
-}
+```bash
+SEPOLIA_RPC_URL=<your_rpc_url>
+PRIVATE_KEY=<your_deployer_private_key>
 ```
 
 2. Deploy:
 
 ```bash
-npx hardhat run scripts/deploy.js --network sepolia
+npm run deploy:sepolia
+# or: npx hardhat run scripts/deploy.js --network sepolia
 ```
 
-3. Verify on Etherscan (optional):
+3. Paste the printed JSON into the frontend Deployment panel while MetaMask is connected to Sepolia.
+
+4. Verify on Etherscan (optional):
 
 ```bash
 npx hardhat verify --network sepolia <contract_address> <constructor_args>
 ```
+
+### Current Recorded Sepolia Addresses
+
+Update this table if the project is redeployed.
+
+| Contract | Address |
+|---|---|
+| `PoolFactory` | `0x80fEbDCd94639Ff5F3D21B2E6F772bA782B97c74` |
+| `PositionManager` | `0x518b4D94840F1b44AEC53f9E4C5286fE59CA899c` |
+| `SwapRouter` | `0x6f7471B49BC51551d6D0AF6d4C19FaE949CA47Cb` |
+| `Quoter` | `0x7e730073cFc13827F435ca2Eb220444497fBC267` |
+| `DynamicFeeAdvisor` | `0xF4372ac6BEf5D56B197E69Af69dd873d26C8De21` |
+| `Token A` | `0xEd53256bCC1447Bc5b0954DB14481B14a3016322` |
+| `Token B` | `0x9DC22e741752A67FACDC0c35D852846ab99bbA22` |
+| `Pool` | `0x94E1A4F63f9D2522900AAD444F80C2a433637d91` |
 
 ---
 
@@ -141,5 +157,5 @@ npx hardhat verify --network sepolia <contract_address> <constructor_args>
 | `Error: cannot find module '@nomicfoundation/hardhat-toolbox'` | Run `npm install` |
 | `Error: POOL_EXISTS` | The pool for this pair and fee already exists; use `factory.getPool()` to retrieve the address |
 | `Error: NOT_INITIALIZED` | Call `pool.initialize(sqrtPriceX96)` before minting or swapping |
-| MetaMask "wrong network" | Switch to Hardhat Local (chain ID 31337) |
+| MetaMask "wrong network" | Switch to Hardhat Local (chain ID 31337) for local demo, or Sepolia for testnet demo |
 | Frontend shows no pool bar | Paste correct JSON and click Load; pool address is resolved from the factory |

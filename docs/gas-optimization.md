@@ -3,93 +3,87 @@
 ## Optimization Strategies
 
 ### Compiler Settings
-- Solidity optimizer enabled with **200 runs** (balances deployment vs call cost)
-- `viaIR: true` for the IR-based optimizer pipeline, enabling cross-function inlining
-- `evmVersion: cancun` targets PUSH0 and transient-storage opcodes
+
+- Solidity optimizer enabled with **200 runs**.
+- `viaIR: true` enables the IR-based optimizer pipeline and cross-function inlining.
+- `evmVersion: cancun` targets the current EVM feature set used by Hardhat.
 
 ### Storage Design
-- `Slot0` struct is packed into **one 256-bit storage word**: `uint160 sqrtPriceX96 + int24 tick + uint16 × 3 + bool = 256 bits`
-- `ProtocolFees` packs two `uint128` values into one slot
-- `Position.Info` stores only the delta snapshot, not absolute values — fee claims use subtraction
-- Custom errors (`error Locked()`, `error ZeroLiquidity()`, …) replace revert strings, saving ~50 gas per revert
 
-### Reentrancy Guard
-- Uses a storage flag in `slot0.unlocked` rather than a separate `uint256` slot — the flag read/write is part of the already-loaded `slot0` word
+- `Slot0` packs `uint160 sqrtPriceX96`, `int24 tick`, three `uint16` oracle fields, and the reentrancy flag into one 256-bit word.
+- `ProtocolFees` packs two `uint128` balances into one storage slot.
+- `Position.Info` stores fee-growth snapshots instead of duplicating absolute fee history.
+- Custom errors are used on the main pool paths to reduce revert cost and make failure modes explicit.
 
 ### Arithmetic
-- `FullMath.mulDiv` uses 512-bit intermediate arithmetic to avoid phantom overflow while remaining gas-efficient
-- `unchecked {}` blocks are applied where overflow is provably impossible (fee growth accumulation, tick arithmetic)
-- `SafeCast` eliminates redundant bounds checks by performing them once at the boundary
 
-### Token Transfers
-- `SafeERC20` used throughout — consistent with production standards and avoids silent transfer failures
-- Callbacks (mint, swap) follow **Checks-Effects-Interactions**: state committed before token transfer
-- No unnecessary ERC20 `balanceOf` calls — the callback pattern guarantees token delivery
+- `FullMath.mulDiv` performs 512-bit intermediate arithmetic to avoid phantom overflow in fee, swap, and liquidity calculations.
+- `FullMath.mulDivRoundingUp` is used where rounding direction matters for pool safety.
+- `unchecked {}` blocks are used only where overflow is bounded by protocol invariants.
+- `SafeCast` centralizes downcast checks at library boundaries.
+
+### Tick and Swap Efficiency
+
+- `TickBitmap` stores initialized ticks in packed 256-bit words, avoiding linear scans across empty ticks.
+- Swap execution advances from initialized tick to initialized tick instead of iterating over every possible price point.
+- The pool uses a callback-based token-pull pattern, so it only checks balances around mint/swap callbacks instead of performing redundant transfers.
 
 ---
 
-## Measured Gas Costs (Hardhat local network, optimizer 200 runs, viaIR)
+## Measured Gas Costs
 
 Results captured by `contracts/test/gas/GasReport.test.js` on the local Hardhat network:
 
-| Operation | Gas Used | Notes |
-|---|---:|---|
-| `createPool` | ~3,696,230 | Deploys full Pool contract with all libraries |
-| `initialize` | ~70,254 | Sets sqrtPriceX96, writes first oracle observation |
-| `mint` (wide, ±12000 ticks) | ~445,108 | First mint to two fresh ticks |
-| `mint` (narrow, ±60 ticks) | ~359,159 | Concentrated position, lower tickBitmap writes |
-| `exactInputSingle` (1 token) | ~135,575 | In-range single-step swap |
-| `exactInputSingle` (500 tokens) | ~112,084 | Price moves within active range; fewer SSTORE than expected because tick is not crossed |
-| `exactOutputSingle` | ~104,371 | Exact-output single hop |
-| `increaseLiquidity` | ~243,844 | Adds to existing position (no tick flip) |
-| `decreaseLiquidity` (50%) | ~189,421 | Partial burn, no tick clear |
-| `collect` (fees) | ~98,704 | Triggers burn(0) sync then transfers |
-| `exactInput` (multi-hop, 2 pools) | ~200,813 | Token0 → Token1 → TokenC through two pools |
+| Operation | Gas Used | Upper Bound |
+|---|---:|---:|
+| `createPool` | 3,711,067 | 4,500,000 |
+| `initialize` | 70,254 | 120,000 |
+| `mint` wide range | 467,417 | 600,000 |
+| `mint` narrow range | 381,468 | 600,000 |
+| `exactInputSingle` 1 token | 135,718 | 200,000 |
+| `exactInputSingle` 500 tokens | 112,227 | 400,000 |
+| `exactOutputSingle` | 104,558 | 250,000 |
+| `increaseLiquidity` | 249,047 | 350,000 |
+| `decreaseLiquidity` 50% | 189,378 | 300,000 |
+| `collect` fees | 100,990 | 250,000 |
+| `exactInput` multi-hop, 2 pools | 201,226 | 500,000 |
 
-Total gas across all 11 benchmarked operations: **~5,655,593**
+Total gas across all 11 benchmarked operations: **5,723,350**.
 
-> All measurements are approximate and vary with specific state (tick crossings, storage warmth, EVM version). On a public testnet or mainnet, expect comparable figures.
+These figures vary with state, especially tick crossings, storage warmth, active liquidity, and oracle writes.
 
 ---
 
-## Batch Operations: EIP-2612 Permit + Multicall
+## Permit + Multicall Savings
 
-`SwapRouter` and `PositionManager` inherit `Multicall` + `SelfPermit`, so an off-chain
-EIP-2612 signature and the on-chain action execute in **one transaction** instead of a
-separate `approve` transaction followed by the action. Measured by
-`contracts/test/gas/PermitGas.test.js`:
+`SwapRouter` and `PositionManager` inherit `Multicall` and `SelfPermit`, allowing an EIP-2612 permit signature and the target action to execute in a single transaction.
 
-| Flow | Classic (separate approve) | Permit multicall | Saved |
+Measured by `contracts/test/gas/PermitGas.test.js`:
+
+| Flow | Classic | Permit Multicall | Saved |
 |---|---:|---:|---:|
-| Swap: `approve` + `exactInputSingle` | 180,244 (2 tx) | 149,535 (1 tx) | **30,709 (~17%)** |
-| Mint: `approve` ×2 + `mint` | 405,911 (3 tx) | 364,606 (1 tx) | **41,305 (~10%)** |
+| Swap: `approve` + `exactInputSingle` | 180,256 gas across 2 tx | 149,535 gas in 1 tx | 30,721 gas |
+| Mint: `approve` x2 + `mint` | 428,109 gas across 3 tx | 386,848 gas in 1 tx | 41,261 gas |
 
-The saving comes from eliminating each standalone `approve` transaction's ~21,000-gas
-intrinsic cost (plus its calldata), partially offset by the permit's `ecrecover` and
-nonce SSTORE. The mint figures use pre-initialized ticks so the comparison isolates the
-batching effect rather than one-time tick-initialization cost.
-
-Beyond raw gas, batching gives a single wallet confirmation and an atomic
-approve-and-act (the allowance never lingers between transactions). The frontend exposes
-this via an **EIP-2612 permit** toggle on the Swap panel; the classic fallback path now
-approves the **exact** amount instead of an over-approval.
+The saving comes from removing standalone approval transactions. Permit verification has its own cost, but it still improves both gas and UX by reducing wallet confirmations and avoiding lingering broad allowances.
 
 ---
 
-## Key Trade-offs
+## Trade-offs
 
-| Choice | Pro | Con |
+| Choice | Benefit | Cost |
 |---|---|---|
-| `viaIR: true` | Best optimizer; enables cross-function inlining | Longer compile time |
-| `createPool` deploys full Pool | No proxy overhead; full bytecode visible for auditing | High deployment cost |
-| Custom reentrancy in `slot0` | Saves one storage slot | Less explicit than OpenZeppelin's `ReentrancyGuard` |
-| Tick bitmap search | O(1) amortised next-tick lookup | Complex; bugs would be expensive |
-| Callback pattern for token pulls | No pre-approval needed from pool | Requires callers to implement callbacks |
+| `viaIR: true` | Strong optimizer and better inlining | Longer compile time |
+| Full pool deployment per pair | No proxy overhead and simpler audit surface | Higher `createPool` cost |
+| Reentrancy flag in `Slot0` | Saves a dedicated storage slot | Less familiar than OpenZeppelin `ReentrancyGuard` |
+| Tick bitmap search | Efficient next-tick lookup | More complex implementation |
+| Callback token pulls | Matches V3-style periphery and avoids unnecessary transfers | Requires callback authentication |
 
 ---
 
 ## Further Opportunities
 
-- **Packing `protocolFee` into `Slot0`** would save one SLOAD per swap when the protocol fee is active
-- ~~**Multicall** on the PositionManager would let LPs mint + increase in one tx~~ — **implemented** via `Multicall` + `SelfPermit` (see *Batch Operations* above)
-- **TWAP cardinality warm-up** (calling `increaseObservationCardinalityNext` at deployment) saves gas on the first oracle write
+- Pack `protocolFee` into `Slot0` to save one `SLOAD` per swap when protocol fees are active.
+- Warm up oracle cardinality at deployment for pools expected to serve long-window TWAPs.
+- Convert remaining revert strings to custom errors.
+- Add deeper gas snapshots for Sepolia transactions, not only local Hardhat execution.
